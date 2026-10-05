@@ -45,6 +45,17 @@ def apply_filters(df, key):
 SHARE_COLORS = {"Lodgement %": "#2a78d6", "Volume %": "#eb6834", "Cost %": "#1baf7a"}
 
 
+def _short(x):
+    """Compact Indian-style number for bar labels: 1,492 -> 1.5K, 6,679,852 -> 66.8L, 2.3 crore -> 2.30Cr."""
+    if x >= 1e7:
+        return f"{x / 1e7:.2f}Cr"
+    if x >= 1e5:
+        return f"{x / 1e5:.1f}L"
+    if x >= 1e3:
+        return f"{x / 1e3:.1f}K"
+    return f"{x:.0f}"
+
+
 def _flip(state_key):
     st.session_state[state_key] = not st.session_state.get(state_key, False)
 
@@ -64,12 +75,14 @@ def agent_chart(in_table, agents, key):
     for a in agents:
         part = in_table[in_table["AGENT"] == a]
         actual = {"Lodgement %": len(part), "Volume %": part["CHR_WT"].sum(), "Cost %": part["TOTAL_FRT"].sum()}
-        shown = {"Lodgement %": _n(actual["Lodgement %"]), "Volume %": f"{_n(actual['Volume %'])} kg",
+        exact = {"Lodgement %": _n(actual["Lodgement %"]), "Volume %": f"{_n(actual['Volume %'])} kg",
                  "Cost %": f"₹{_n(actual['Cost %'])}"}
+        short = {"Lodgement %": exact["Lodgement %"], "Volume %": f"{_short(actual['Volume %'])} kg",
+                 "Cost %": f"₹{_short(actual['Cost %'])}"}
         for measure in SHARE_COLORS:
             share = actual[measure] / grand[measure] * 100 if grand[measure] else 0
             rows.append({"Agent": a, "Measure": measure, "Share": share,
-                         "Pct": f"{share:.0f}%", "Actual": shown[measure]})
+                         "Pct": f"{share:.0f}%", "Actual": short[measure], "Exact": exact[measure]})
     shares = pd.DataFrame(rows)
 
     axis_x = alt.Axis(labelAngle=0, title=None, labelColor="#33415C", domain=False, ticks=False)
@@ -82,7 +95,7 @@ def agent_chart(in_table, agents, key):
         y=alt.Y("Share:Q", title="Share of total (%)", axis=alt.Axis(**axis_y),
                 scale=alt.Scale(domainMax=shares["Share"].max() * 1.18 if len(shares) else 100)),
         tooltip=["Agent", "Measure", alt.Tooltip("Share:Q", title="Share %", format=".1f"),
-                 alt.Tooltip("Actual:N", title="Actual")],
+                 alt.Tooltip("Exact:N", title="Actual")],
     )
     bars = base.mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4, stroke="#FFFFFF", strokeWidth=2).encode(
         color=alt.Color("Measure:N", sort=list(SHARE_COLORS),
