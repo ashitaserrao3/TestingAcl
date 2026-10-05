@@ -97,18 +97,15 @@ def agent_chart(in_table, agents, key):
         y=alt.Y("CPKG:Q", title="CPKG (₹/kg)", axis=alt.Axis(**axis_y)),
     )
     cpkg_chart = (
-        cpkg_base.mark_bar(color=CPKG_COLOR, cornerRadiusTopLeft=4, cornerRadiusTopRight=4, size=28)
+        cpkg_base.mark_bar(color=CPKG_COLOR, cornerRadiusTopLeft=4, cornerRadiusTopRight=4, size=44)
         .encode(tooltip=["Agent", alt.Tooltip("CPKG:Q", format=",.2f")])
         + cpkg_base.mark_text(dy=-8, color="#33415C", fontSize=12).encode(text=alt.Text("CPKG:Q", format=",.2f"))
     ).properties(height=320)
 
-    left, right = st.columns([3, 2])
-    with left:
-        section("Lodgement · Volume · Cost share by agent")
-        st.altair_chart(share_chart, use_container_width=True)
-    with right:
-        section("CPKG by agent")
-        st.altair_chart(cpkg_chart, use_container_width=True)
+    section("Lodgement · Volume · Cost share by agent")
+    st.altair_chart(share_chart, use_container_width=True)
+    section("CPKG by agent")
+    st.altair_chart(cpkg_chart, use_container_width=True)
 
 
 def show_dashboard(df, key="dash"):
