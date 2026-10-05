@@ -56,6 +56,16 @@ def _short(x):
     return f"{x:.0f}"
 
 
+def _tonnes(kg):
+    """Bar label for weight: 293,720 kg -> '294 t', 4,675 kg -> '4.7 t', 72 kg -> '0.07 t'."""
+    t = kg / 1000
+    if t >= 100:
+        return f"{t:,.0f} t"
+    if t >= 1:
+        return f"{t:.1f} t"
+    return f"{t:.2f} t"
+
+
 def _flip(state_key):
     st.session_state[state_key] = not st.session_state.get(state_key, False)
 
@@ -77,7 +87,7 @@ def agent_chart(in_table, agents, key):
         actual = {"Lodgement %": len(part), "Volume %": part["CHR_WT"].sum(), "Cost %": part["TOTAL_FRT"].sum()}
         exact = {"Lodgement %": _n(actual["Lodgement %"]), "Volume %": f"{_n(actual['Volume %'])} kg",
                  "Cost %": f"₹{_n(actual['Cost %'])}"}
-        short = {"Lodgement %": exact["Lodgement %"], "Volume %": f"{_short(actual['Volume %'])} kg",
+        short = {"Lodgement %": exact["Lodgement %"], "Volume %": _tonnes(actual["Volume %"]),
                  "Cost %": f"₹{_short(actual['Cost %'])}"}
         for measure in SHARE_COLORS:
             share = actual[measure] / grand[measure] * 100 if grand[measure] else 0
