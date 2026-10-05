@@ -1,3 +1,4 @@
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -38,6 +39,76 @@ def apply_filters(df, key):
         if choice != "All":
             filtered = filtered[filtered[col].astype(str) == choice]
     return filtered
+
+
+# one colour per measure, same order everywhere (blue, orange, aqua)
+SHARE_COLORS = {"Lodgement %": "#2a78d6", "Volume %": "#eb6834", "Cost %": "#1baf7a"}
+CPKG_COLOR = "#1D4E89"
+
+
+def _flip(state_key):
+    st.session_state[state_key] = not st.session_state.get(state_key, False)
+
+
+def agent_chart(in_table, agents, key):
+    """'View' button under the agent table -> share-% bars and CPKG bars per agent."""
+    state_key = f"{key}_agent_chart"
+    showing = st.session_state.get(state_key, False)
+    st.button("Hide chart" if showing else "📊 View", key=f"{key}_agent_chart_btn",
+              on_click=_flip, args=(state_key,))
+    if not showing:
+        return
+
+    totals = in_table[["CHR_WT", "TOTAL_FRT"]].sum()
+    rows = []
+    for a in agents:
+        part = in_table[in_table["AGENT"] == a]
+        rows.append({
+            "Agent": a,
+            "Lodgement %": len(part) / len(in_table) * 100 if len(in_table) else 0,
+            "Volume %": part["CHR_WT"].sum() / totals["CHR_WT"] * 100 if totals["CHR_WT"] else 0,
+            "Cost %": part["TOTAL_FRT"].sum() / totals["TOTAL_FRT"] * 100 if totals["TOTAL_FRT"] else 0,
+            "CPKG": _cpkg(part),
+        })
+    data = pd.DataFrame(rows)
+    shares = data.melt(id_vars="Agent", value_vars=list(SHARE_COLORS), var_name="Measure", value_name="Share")
+
+    axis_x = alt.Axis(labelAngle=0, title=None, labelColor="#33415C", domain=False, ticks=False)
+    axis_y = dict(grid=True, gridColor="#EEF1F6", domain=False, ticks=False, labelColor="#5B6B82",
+                  titleColor="#5B6B82")
+
+    share_chart = (
+        alt.Chart(shares)
+        .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4, stroke="#FFFFFF", strokeWidth=2)
+        .encode(
+            x=alt.X("Agent:N", sort=agents, axis=axis_x),
+            xOffset=alt.XOffset("Measure:N", sort=list(SHARE_COLORS)),
+            y=alt.Y("Share:Q", title="Share of total (%)", axis=alt.Axis(**axis_y)),
+            color=alt.Color("Measure:N", sort=list(SHARE_COLORS),
+                            scale=alt.Scale(domain=list(SHARE_COLORS), range=list(SHARE_COLORS.values())),
+                            legend=alt.Legend(orient="top", title=None, labelColor="#33415C")),
+            tooltip=["Agent", "Measure", alt.Tooltip("Share:Q", title="Share %", format=".1f")],
+        )
+        .properties(height=320)
+    )
+
+    cpkg_base = alt.Chart(data).encode(
+        x=alt.X("Agent:N", sort=agents, axis=axis_x),
+        y=alt.Y("CPKG:Q", title="CPKG (₹/kg)", axis=alt.Axis(**axis_y)),
+    )
+    cpkg_chart = (
+        cpkg_base.mark_bar(color=CPKG_COLOR, cornerRadiusTopLeft=4, cornerRadiusTopRight=4, size=28)
+        .encode(tooltip=["Agent", alt.Tooltip("CPKG:Q", format=",.2f")])
+        + cpkg_base.mark_text(dy=-8, color="#33415C", fontSize=12).encode(text=alt.Text("CPKG:Q", format=",.2f"))
+    ).properties(height=320)
+
+    left, right = st.columns([3, 2])
+    with left:
+        section("Lodgement · Volume · Cost share by agent")
+        st.altair_chart(share_chart, use_container_width=True)
+    with right:
+        section("CPKG by agent")
+        st.altair_chart(cpkg_chart, use_container_width=True)
 
 
 def show_dashboard(df, key="dash"):
@@ -98,6 +169,7 @@ def show_dashboard(df, key="dash"):
         section("Agent-wise · Console vs Direct")
         by_frt = in_table.groupby("AGENT")["TOTAL_FRT"].sum().sort_values(ascending=False).index
         pivot("Agent", [(a, in_table[in_table["AGENT"] == a]) for a in by_frt])
+        agent_chart(in_table, list(by_frt), key)
 
     # ---------------- LANES: costliest / cheapest by CPKG ----------------
     lanes = (
