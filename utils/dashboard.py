@@ -57,13 +57,13 @@ def _short(x):
 
 
 def _tonnes(kg):
-    """Bar label for weight: 293,720 kg -> '294 t', 4,675 kg -> '4.7 t', 72 kg -> '0.07 t'."""
+    """Bar label for weight: 293,720 kg -> '294 T', 4,675 kg -> '4.7 T', 72 kg -> '0.07 T'."""
     t = kg / 1000
     if t >= 100:
-        return f"{t:,.0f} t"
+        return f"{t:,.0f} T"
     if t >= 1:
-        return f"{t:.1f} t"
-    return f"{t:.2f} t"
+        return f"{t:.1f} T"
+    return f"{t:.2f} T"
 
 
 def _flip(state_key):
