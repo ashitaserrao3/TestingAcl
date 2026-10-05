@@ -58,37 +58,41 @@ def agent_chart(in_table, agents, key):
     if not showing:
         return
 
-    totals = in_table[["CHR_WT", "TOTAL_FRT"]].sum()
+    grand = {"Lodgement %": len(in_table), "Volume %": in_table["CHR_WT"].sum(),
+             "Cost %": in_table["TOTAL_FRT"].sum()}
     rows = []
     for a in agents:
         part = in_table[in_table["AGENT"] == a]
-        rows.append({
-            "Agent": a,
-            "Lodgement %": len(part) / len(in_table) * 100 if len(in_table) else 0,
-            "Volume %": part["CHR_WT"].sum() / totals["CHR_WT"] * 100 if totals["CHR_WT"] else 0,
-            "Cost %": part["TOTAL_FRT"].sum() / totals["TOTAL_FRT"] * 100 if totals["TOTAL_FRT"] else 0,
-        })
-    data = pd.DataFrame(rows)
-    shares = data.melt(id_vars="Agent", value_vars=list(SHARE_COLORS), var_name="Measure", value_name="Share")
+        actual = {"Lodgement %": len(part), "Volume %": part["CHR_WT"].sum(), "Cost %": part["TOTAL_FRT"].sum()}
+        shown = {"Lodgement %": _n(actual["Lodgement %"]), "Volume %": f"{_n(actual['Volume %'])} kg",
+                 "Cost %": f"₹{_n(actual['Cost %'])}"}
+        for measure in SHARE_COLORS:
+            share = actual[measure] / grand[measure] * 100 if grand[measure] else 0
+            rows.append({"Agent": a, "Measure": measure, "Share": share,
+                         "Pct": f"{share:.0f}%", "Actual": shown[measure]})
+    shares = pd.DataFrame(rows)
 
     axis_x = alt.Axis(labelAngle=0, title=None, labelColor="#33415C", domain=False, ticks=False)
     axis_y = dict(grid=True, gridColor="#EEF1F6", domain=False, ticks=False, labelColor="#5B6B82",
                   titleColor="#5B6B82")
 
-    share_chart = (
-        alt.Chart(shares)
-        .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4, stroke="#FFFFFF", strokeWidth=2)
-        .encode(
-            x=alt.X("Agent:N", sort=agents, axis=axis_x),
-            xOffset=alt.XOffset("Measure:N", sort=list(SHARE_COLORS)),
-            y=alt.Y("Share:Q", title="Share of total (%)", axis=alt.Axis(**axis_y)),
-            color=alt.Color("Measure:N", sort=list(SHARE_COLORS),
-                            scale=alt.Scale(domain=list(SHARE_COLORS), range=list(SHARE_COLORS.values())),
-                            legend=alt.Legend(orient="top", title=None, labelColor="#33415C")),
-            tooltip=["Agent", "Measure", alt.Tooltip("Share:Q", title="Share %", format=".1f")],
-        )
-        .properties(height=320)
+    base = alt.Chart(shares).encode(
+        x=alt.X("Agent:N", sort=agents, axis=axis_x),
+        xOffset=alt.XOffset("Measure:N", sort=list(SHARE_COLORS)),
+        y=alt.Y("Share:Q", title="Share of total (%)", axis=alt.Axis(**axis_y),
+                scale=alt.Scale(domainMax=shares["Share"].max() * 1.18 if len(shares) else 100)),
+        tooltip=["Agent", "Measure", alt.Tooltip("Share:Q", title="Share %", format=".1f"),
+                 alt.Tooltip("Actual:N", title="Actual")],
     )
+    bars = base.mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4, stroke="#FFFFFF", strokeWidth=2).encode(
+        color=alt.Color("Measure:N", sort=list(SHARE_COLORS),
+                        scale=alt.Scale(domain=list(SHARE_COLORS), range=list(SHARE_COLORS.values())),
+                        legend=alt.Legend(orient="top", title=None, labelColor="#33415C")),
+    )
+    # % on top (bold), actual number just under it
+    pct = base.mark_text(dy=-20, fontSize=11, fontWeight="bold", color="#14213D").encode(text="Pct:N")
+    actual = base.mark_text(dy=-7, fontSize=10, color="#5B6B82").encode(text="Actual:N")
+    share_chart = (bars + pct + actual).properties(height=360)
 
     section("Lodgement · Volume · Cost share by agent")
     st.altair_chart(share_chart, width="stretch")
