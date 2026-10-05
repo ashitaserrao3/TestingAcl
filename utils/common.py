@@ -75,7 +75,8 @@ AIRLINE_NAMES = [
     ("AKASA", "Akasa"),
     ("STAR AIR", "StarAir"),
     ("ALLIANCE", "AllianceAir"),
-    ("QUICKJET", "Quickjet"),
+    ("QUIKJET", "Quikjet"),
+    ("QUICKJET", "Quikjet"),
 ]
 
 # 3-digit air waybill prefix -> airline (used only when the flight cell is empty
