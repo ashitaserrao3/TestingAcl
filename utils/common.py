@@ -62,6 +62,7 @@ AIRLINE_CODES = {
     "S5": "StarAir",
     "QP": "Akasa",
     "9I": "AllianceAir",
+    "QO": "Quikjet",
 }
 
 # Some bills write the airline name instead of a flight number
@@ -74,6 +75,7 @@ AIRLINE_NAMES = [
     ("AKASA", "Akasa"),
     ("STAR AIR", "StarAir"),
     ("ALLIANCE", "AllianceAir"),
+    ("QUICKJET", "Quickjet"),
 ]
 
 # 3-digit air waybill prefix -> airline (used only when the flight cell is empty
