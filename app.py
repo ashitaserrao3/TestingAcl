@@ -117,6 +117,7 @@ if not st.session_state.get("authentication_status"):
 # =====================================================
 
 MENU = {
+    "MULTI - AGENT": None,
     "INDEX": index,
     "POBC": pobc,
     "PCF(South)": pcf_south,
@@ -125,7 +126,6 @@ MENU = {
     "BHAGWATI": bhagwati,
     "FDC": fdc,
     "EDS": eds,
-    "MULTI - AGENT": None,
 }
 ICONS = {"FDC": "🚚", "MULTI - AGENT": "🧩"}
 NAMES = {"MULTI - AGENT": "All agents (combined)"}
