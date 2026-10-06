@@ -78,6 +78,9 @@ def agent_chart(in_table, agents, key):
               on_click=_flip, args=(state_key,))
     if not showing:
         return
+    if in_table.empty:  # e.g. Road: no Console / Direct rows to chart
+        st.caption("No Console / Direct shipments for these filters, so there is nothing to chart.")
+        return
 
     grand = {"Lodgement %": len(in_table), "Volume %": in_table["CHR_WT"].sum(),
              "Cost %": in_table["TOTAL_FRT"].sum()}
