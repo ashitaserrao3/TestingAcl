@@ -24,10 +24,13 @@ def _n(x, dp=0):
     return f"{x:,.{dp}f}"
 
 
+FILTER_COLS = ["AGENT", "ORIGIN", "DEST", "BILL_PERIOD", "TRNSPT_MODE"]
+
+
 def apply_filters(df, key):
-    filters = ["ORIGIN", "DEST", "BILL_PERIOD", "TRNSPT_MODE"]
+    filters = FILTER_COLS[1:]
     if df["AGENT"].nunique() > 1:
-        filters = ["AGENT"] + filters
+        filters = FILTER_COLS
     labels = {"AGENT": "Agent", "ORIGIN": "Origin", "DEST": "Destination", "BILL_PERIOD": "Bill period",
               "TRNSPT_MODE": "Transport mode"}
 
@@ -73,6 +76,12 @@ def _flip(state_key):
 def agent_chart(in_table, agents, key):
     """'View' button under the agent table -> share-% bars per agent."""
     state_key = f"{key}_agent_chart"
+    # collapse again whenever the filters / data change, like the tables do
+    filters = tuple(st.session_state.get(f"{key}_{col}") for col in FILTER_COLS)
+    signature = (filters, len(in_table), tuple(agents), float(in_table["TOTAL_FRT"].sum()))
+    if st.session_state.get(f"{state_key}_sig") != signature:
+        st.session_state[f"{state_key}_sig"] = signature
+        st.session_state[state_key] = False
     showing = st.session_state.get(state_key, False)
     st.button("Hide chart" if showing else "📊 View", key=f"{key}_agent_chart_btn",
               on_click=_flip, args=(state_key,))
