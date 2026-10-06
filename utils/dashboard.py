@@ -2,6 +2,8 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
+from utils.activity_log import log_event
+from utils.pdf_report import build_pdf
 from utils.ui import html_table, section
 
 SLAB_GROUPS = {
@@ -28,20 +30,20 @@ def _n(x, dp=0):
 WT_HEADER, FRT_HEADER = "Chg. Wt (kg)", "Total Frt (₹)"
 
 FILTER_COLS = ["AGENT", "ORIGIN", "DEST", "BILL_PERIOD", "TRNSPT_MODE"]
+FILTER_LABELS = {"AGENT": "Agent", "ORIGIN": "Origin", "DEST": "Destination", "BILL_PERIOD": "Bill period",
+                 "TRNSPT_MODE": "Transport mode"}
 
 
 def apply_filters(df, key):
     filters = FILTER_COLS[1:]
     if df["AGENT"].nunique() > 1:
         filters = FILTER_COLS
-    labels = {"AGENT": "Agent", "ORIGIN": "Origin", "DEST": "Destination", "BILL_PERIOD": "Bill period",
-              "TRNSPT_MODE": "Transport mode"}
 
     cols = st.columns(len(filters))
     filtered = df
     for col_ui, col in zip(cols, filters):
         with col_ui:
-            choice = st.selectbox(labels[col], _options(df, col), key=f"{key}_{col}")
+            choice = st.selectbox(FILTER_LABELS[col], _options(df, col), key=f"{key}_{col}")
         if choice != "All":
             filtered = filtered[filtered[col].astype(str) == choice]
     return filtered
@@ -89,14 +91,11 @@ def view_toggle(key, name, data, view_label, hide_label):
     return showing
 
 
-def agent_chart(in_table, agents, key):
-    """'View' button under the agent table -> share-% bars per agent."""
-    if not view_toggle(key, "agent_chart", in_table, "📊 View", "Hide chart"):
-        return
-    if in_table.empty:  # e.g. Road: no Console / Direct rows to chart
-        st.caption("No Console / Direct shipments for these filters, so there is nothing to chart.")
-        return
+CHART_TITLE = "Lodgement · Volume · Cost share by agent"
 
+
+def share_data(in_table, agents):
+    """One row per agent × measure: share %, short label for the bar, exact figure for the tooltip."""
     grand = {"Lodgement %": len(in_table), "Volume %": in_table["CHR_WT"].sum(),
              "Cost %": in_table["TOTAL_FRT"].sum()}
     rows = []
@@ -111,7 +110,17 @@ def agent_chart(in_table, agents, key):
             share = actual[measure] / grand[measure] * 100 if grand[measure] else 0
             rows.append({"Agent": a, "Measure": measure, "Share": share,
                          "Pct": f"{share:.0f}%", "Actual": short[measure], "Exact": exact[measure]})
-    shares = pd.DataFrame(rows)
+    return pd.DataFrame(rows)
+
+
+def agent_chart(in_table, agents, key):
+    """'View' button under the agent table -> share-% bars per agent."""
+    if not view_toggle(key, "agent_chart", in_table, "📊 View", "Hide chart"):
+        return
+    if in_table.empty:  # e.g. Road: no Console / Direct rows to chart
+        st.caption("No Console / Direct shipments for these filters, so there is nothing to chart.")
+        return
+    shares = share_data(in_table, agents)
 
     axis_x = alt.Axis(labelAngle=0, title=None, labelColor="#33415C", domain=False, ticks=False)
     axis_y = dict(grid=True, gridColor="#EEF1F6", domain=False, ticks=False, labelColor="#5B6B82",
@@ -135,26 +144,30 @@ def agent_chart(in_table, agents, key):
     actual = base.mark_text(dy=-7, fontSize=10, color="#5B6B82").encode(text="Actual:N")
     share_chart = (bars + pct + actual).properties(height=360)
 
-    section("Lodgement · Volume · Cost share by agent")
+    section(CHART_TITLE)
     st.altair_chart(share_chart, width="stretch")
 
 
-def show_dashboard(df, key="dash"):
-    """Filters + KPIs + slab matrix + lane summary. Returns the filtered rows."""
+def show_dashboard(df, key="dash", pdf_name="Dashboard.pdf", month=None):
+    """Filters + KPIs + slab matrix + lane summary + PDF download. Returns the filtered rows."""
     filtered = apply_filters(df, key)
+    _, pdf_col = st.columns([4, 1])
+    pdf_slot = pdf_col.empty()  # filled at the end, once everything below is worked out
+    report = []  # what the dashboard shows, for the PDF
 
     # ---------------- KPIs ----------------
-    k = st.columns(4)
-    k[0].metric("AWBs", _n(len(filtered)))
-    k[1].metric("Total freight (₹)", _n(filtered["TOTAL_FRT"].sum()))
-    k[2].metric("Chargeable weight (kg)", _n(filtered["CHR_WT"].sum(), 1))
-    k[3].metric("CPKG (₹/kg)", _n(_cpkg(filtered), 2))
+    kpis = [("AWBs", _n(len(filtered))), ("Total freight (₹)", _n(filtered["TOTAL_FRT"].sum())),
+            ("Chargeable weight (kg)", _n(filtered["CHR_WT"].sum(), 1)), ("CPKG (₹/kg)", _n(_cpkg(filtered), 2))]
+    for col, (label, value) in zip(st.columns(4), kpis):
+        col.metric(label, value)
+    report.append(("kpis", kpis))
 
     # ---------------- SLAB × MODE ----------------
     # Road has no Console / Direct, so road-only data gets plain tables without that split
     road_only = len(filtered) > 0 and (filtered["TRNSPT_MODE"].astype(str).str.upper() == "ROAD").all()
     split_title = "" if road_only else " · Console vs Direct"
-    section("Slab-wise" + split_title)
+    slab_title = "Slab-wise" + split_title
+    section(slab_title)
     mode = filtered["LODGE_MODE"].astype(str).str.upper()
     lodged = filtered["SLAB"].notna() if road_only else mode.isin(["DIRECT", "CONSOLE"]) & filtered["SLAB"].notna()
     in_table = filtered[lodged]
@@ -170,14 +183,14 @@ def show_dashboard(df, key="dash"):
 
     headers = ["Lodge mode", "Lodgements", "Lodgement %", WT_HEADER, "Volume %", FRT_HEADER, "Cost %", "CPKG"]
 
-    def pivot(first_header, parts):
+    def pivot(table_title, first_header, parts):
         """parts: (title, rows of in_table) -> one foldable group each: total on top, Console / Direct underneath.
         Road-only data: one plain row per part."""
         if road_only:
-            html_table(
-                [first_header] + headers[1:], [[title] + cells(part) for title, part in parts],
-                total_row=["Grand Total"] + cells(in_table), group_starts=(1, 3, 5, 7), text_cols=(0,),
-            )
+            rows = [[title] + cells(part) for title, part in parts]
+            total = ["Grand Total"] + cells(in_table)
+            html_table([first_header] + headers[1:], rows, total_row=total, group_starts=(1, 3, 5, 7), text_cols=(0,))
+            report.append(("table", table_title, [first_header] + headers[1:], [("", r) for r in rows], total))
             return
         groups = []
         for title, part in parts:
@@ -185,12 +198,16 @@ def show_dashboard(df, key="dash"):
             details = [["", label] + cells(part[pmode == name])
                        for name, label in [("CONSOLE", "Console"), ("DIRECT", "Direct")]]
             groups.append(([title, ""] + cells(part), details))
+        total = ["Grand Total", ""] + cells(in_table)
         html_table(
-            [first_header] + headers, None, total_row=["Grand Total", ""] + cells(in_table),
+            [first_header] + headers, None, total_row=total,
             group_starts=(2, 4, 6, 8), text_cols=(0, 1), fold_groups=groups,
         )
+        pdf_rows = [row for summary, details in groups
+                    for row in [("sub", summary)] + [("detail", d) for d in details]]
+        report.append(("table", table_title, [first_header] + headers, pdf_rows, total))
 
-    pivot("Slab", [(title, in_table[in_table["SLAB"].isin(slabs)]) for title, slabs in SLAB_GROUPS.items()])
+    pivot(slab_title, "Slab", [(title, in_table[in_table["SLAB"].isin(slabs)]) for title, slabs in SLAB_GROUPS.items()])
 
     other = filtered[~mode.isin(["DIRECT", "CONSOLE"])] if not road_only else filtered.iloc[0:0]
     notes = []
@@ -202,13 +219,19 @@ def show_dashboard(df, key="dash"):
         notes.append(f"{no_slab:,} rows without weight")
     if notes:
         st.caption("Not in the table above: " + " · ".join(notes))
+        report.append(("note", "Not in the table above: " + " · ".join(notes)))
 
     # ---------------- AGENT × MODE ----------------
     if filtered["AGENT"].nunique() > 1:
         section("Agent-wise" + split_title)
         by_frt = in_table.groupby("AGENT")["TOTAL_FRT"].sum().sort_values(ascending=False).index
-        pivot("Agent", [(a, in_table[in_table["AGENT"] == a]) for a in by_frt])
+        pivot("Agent-wise" + split_title, "Agent", [(a, in_table[in_table["AGENT"] == a]) for a in by_frt])
         agent_chart(in_table, list(by_frt), key)
+        if not in_table.empty:
+            sd = share_data(in_table, list(by_frt))
+            report.append(("chart", CHART_TITLE, list(by_frt),
+                           {m: sd[sd["Measure"] == m]["Share"].tolist() for m in SHARE_COLORS},
+                           {m: sd[sd["Measure"] == m]["Actual"].tolist() for m in SHARE_COLORS}))
 
     # ---------------- LANES: costliest / cheapest by CPKG, high vs low volume ----------------
     lanes = (
@@ -238,6 +261,7 @@ def show_dashboard(df, key="dash"):
     hv_up, hv_down = top_bottom(high_vol)
     lv_up, lv_down = top_bottom(low_vol)
     lane_headers = ["Lane (OD)", "AWBs", WT_HEADER, FRT_HEADER, "CPKG"]
+    lane_tables = []
     for (l_title, l_rows, tone), (r_title, r_rows, _) in [
         (("Top 10 lanes · ↑ High vol · ↑ CPKG", hv_up, "red"), ("Top 10 lanes · ↓ Low vol · ↑ CPKG", lv_up, "red")),
         (("Top 10 lanes · ↑ High vol · ↓ CPKG", hv_down, "green"), ("Top 10 lanes · ↓ Low vol · ↓ CPKG", lv_down, "green")),
@@ -249,4 +273,27 @@ def show_dashboard(df, key="dash"):
         with right:
             section(r_title)
             html_table(lane_headers, lane_rows(r_rows), tone=tone)
+        lane_tables += [(t, lane_headers, [("", r) for r in lane_rows(rows)], tone)
+                        for t, rows in [(l_title, l_rows), (r_title, r_rows)]]
+    report.append(("lanes", lane_tables))
+
+    # ---------------- PDF of everything above ----------------
+    pdf_slot.download_button(
+        "⬇  Download PDF", data=dashboard_pdf(report, filtered, key, month), file_name=pdf_name,
+        mime="application/pdf", key=f"{key}_pdf", width="stretch", on_click=log_event, args=("DOWNLOAD", pdf_name),
+    )
     return filtered
+
+
+def dashboard_pdf(report, filtered, key, month):
+    """PDF bytes for the current view; built once per filter combination and kept for the session."""
+    filters = [f"{FILTER_LABELS[c]}: {st.session_state[f'{key}_{c}']}" for c in FILTER_COLS
+               if st.session_state.get(f"{key}_{c}") not in (None, "All")]
+    agents = sorted(filtered["AGENT"].dropna().unique())
+    subtitle = [", ".join(agents) or "No agents", month or "All months"] + (filters or ["No filters"])
+    cache = st.session_state.setdefault(f"{key}_pdf_cache", {})
+    sig = (tuple(subtitle), len(filtered), float(filtered["TOTAL_FRT"].sum()))
+    if sig not in cache:
+        cache.clear()
+        cache[sig] = build_pdf(report, "Freight Dashboard", subtitle, SHARE_COLORS)
+    return cache[sig]

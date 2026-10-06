@@ -190,7 +190,7 @@ def show_results(df_all, logs, key, file_name, make_excel, cache, n_files=None):
     )
 
     with t_dash:
-        show_dashboard(df, key=key)
+        show_dashboard(df, key=key, pdf_name=out_name.replace(".xlsx", "_Dashboard.pdf"), month=month)
 
     with t_data:
         q = st.text_input("Search", placeholder="AWB no, invoice, lane…", key=f"{key}_q",
