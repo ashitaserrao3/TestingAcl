@@ -24,6 +24,9 @@ def _n(x, dp=0):
     return f"{x:,.{dp}f}"
 
 
+# on-screen names for the CHR_WT / TOTAL_FRT columns (the Excel export keeps the standard names)
+WT_HEADER, FRT_HEADER = "Chg. Wt (kg)", "Total Frt (₹)"
+
 FILTER_COLS = ["AGENT", "ORIGIN", "DEST", "BILL_PERIOD", "TRNSPT_MODE"]
 
 
@@ -73,19 +76,22 @@ def _flip(state_key):
     st.session_state[state_key] = not st.session_state.get(state_key, False)
 
 
-def agent_chart(in_table, agents, key):
-    """'View' button under the agent table -> share-% bars per agent."""
-    state_key = f"{key}_agent_chart"
-    # collapse again whenever the filters / data change, like the tables do
+def view_toggle(key, name, data, view_label, hide_label):
+    """View / Hide button. Returns True while open; closes again whenever the filters or data change."""
+    state_key = f"{key}_{name}"
     filters = tuple(st.session_state.get(f"{key}_{col}") for col in FILTER_COLS)
-    signature = (filters, len(in_table), tuple(agents), float(in_table["TOTAL_FRT"].sum()))
+    signature = (filters, len(data), float(data["TOTAL_FRT"].sum()))
     if st.session_state.get(f"{state_key}_sig") != signature:
         st.session_state[f"{state_key}_sig"] = signature
         st.session_state[state_key] = False
     showing = st.session_state.get(state_key, False)
-    st.button("Hide chart" if showing else "📊 View", key=f"{key}_agent_chart_btn",
-              on_click=_flip, args=(state_key,))
-    if not showing:
+    st.button(hide_label if showing else view_label, key=f"{state_key}_btn", on_click=_flip, args=(state_key,))
+    return showing
+
+
+def agent_chart(in_table, agents, key):
+    """'View' button under the agent table -> share-% bars per agent."""
+    if not view_toggle(key, "agent_chart", in_table, "📊 View", "Hide chart"):
         return
     if in_table.empty:  # e.g. Road: no Console / Direct rows to chart
         st.caption("No Console / Direct shipments for these filters, so there is nothing to chart.")
@@ -162,7 +168,7 @@ def show_dashboard(df, key="dash"):
         return [_n(n), pct(n, grand[0]), _n(wt), pct(wt, grand[1]), _n(frt), pct(frt, grand[2]),
                 _n(_cpkg(part), 2) if n else '<span class="acl-muted">–</span>']
 
-    headers = ["Lodge mode", "Lodgements", "Lodgement %", "CHR_WT", "Volume %", "TOTAL_FRT", "Cost %", "CPKG"]
+    headers = ["Lodge mode", "Lodgements", "Lodgement %", WT_HEADER, "Volume %", FRT_HEADER, "Cost %", "CPKG"]
 
     def pivot(first_header, parts):
         """parts: (title, rows of in_table) -> one foldable group each: total on top, Console / Direct underneath.
@@ -204,7 +210,7 @@ def show_dashboard(df, key="dash"):
         pivot("Agent", [(a, in_table[in_table["AGENT"] == a]) for a in by_frt])
         agent_chart(in_table, list(by_frt), key)
 
-    # ---------------- LANES: costliest / cheapest by CPKG ----------------
+    # ---------------- LANES: costliest / cheapest by CPKG, high vs low volume ----------------
     lanes = (
         filtered.dropna(subset=["OD_PAIR"])
         .groupby("OD_PAIR")
@@ -214,8 +220,9 @@ def show_dashboard(df, key="dash"):
     lanes = lanes[lanes["CHR_WT"] > 0]
     lanes["CPKG"] = lanes["TOTAL_FRT"] / lanes["CHR_WT"]
 
-    # only busy lanes count: above-average lodgements AND volume for the current filters
-    busy = lanes[(lanes["AWBs"] >= lanes["AWBs"].mean()) & (lanes["CHR_WT"] >= lanes["CHR_WT"].mean())]
+    # split lanes into high / low volume (chargeable weight above / below the median lane)
+    high_vol = lanes[lanes["CHR_WT"] >= lanes["CHR_WT"].median()]
+    low_vol = lanes[lanes["CHR_WT"] < lanes["CHR_WT"].median()]
 
     def lane_rows(top):
         if top.empty:
@@ -223,14 +230,23 @@ def show_dashboard(df, key="dash"):
         return [[f"<b>{r.OD_PAIR}</b>", _n(r.AWBs), _n(r.CHR_WT), _n(r.TOTAL_FRT), f"<b>{_n(r.CPKG, 2)}</b>"]
                 for r in top.itertuples()]
 
-    # fewer than 20 busy lanes -> split them so no lane shows in both tables
-    n_red, n_green = min(10, (len(busy) + 1) // 2), min(10, len(busy) // 2)
-    lane_headers = ["Lane (OD)", "AWBs", "CHR_WT", "TOTAL_FRT", "CPKG"]
-    left, right = st.columns(2)
-    with left:
-        section("Top 10 lanes by ↑ CPKG")
-        html_table(lane_headers, lane_rows(busy.nlargest(n_red, "CPKG")), tone="red")
-    with right:
-        section("Top 10 lanes by ↓ CPKG")
-        html_table(lane_headers, lane_rows(busy.nsmallest(n_green, "CPKG")), tone="green")
+    def top_bottom(group):
+        """Costliest and cheapest 10 by CPKG; fewer than 20 lanes -> split so none shows in both."""
+        n_up, n_down = min(10, (len(group) + 1) // 2), min(10, len(group) // 2)
+        return group.nlargest(n_up, "CPKG"), group.nsmallest(n_down, "CPKG")
+
+    hv_up, hv_down = top_bottom(high_vol)
+    lv_up, lv_down = top_bottom(low_vol)
+    lane_headers = ["Lane (OD)", "AWBs", WT_HEADER, FRT_HEADER, "CPKG"]
+    for (l_title, l_rows, tone), (r_title, r_rows, _) in [
+        (("Top 10 lanes · ↑ High vol · ↑ CPKG", hv_up, "red"), ("Top 10 lanes · ↓ Low vol · ↑ CPKG", lv_up, "red")),
+        (("Top 10 lanes · ↑ High vol · ↓ CPKG", hv_down, "green"), ("Top 10 lanes · ↓ Low vol · ↓ CPKG", lv_down, "green")),
+    ]:
+        left, right = st.columns(2)
+        with left:
+            section(l_title)
+            html_table(lane_headers, lane_rows(l_rows), tone=tone)
+        with right:
+            section(r_title)
+            html_table(lane_headers, lane_rows(r_rows), tone=tone)
     return filtered
