@@ -136,9 +136,13 @@ def show_dashboard(df, key="dash"):
     k[3].metric("CPKG (₹/kg)", _n(_cpkg(filtered), 2))
 
     # ---------------- SLAB × MODE ----------------
-    section("Slab-wise · Console vs Direct")
+    # Road has no Console / Direct, so road-only data gets plain tables without that split
+    road_only = len(filtered) > 0 and (filtered["TRNSPT_MODE"].astype(str).str.upper() == "ROAD").all()
+    split_title = "" if road_only else " · Console vs Direct"
+    section("Slab-wise" + split_title)
     mode = filtered["LODGE_MODE"].astype(str).str.upper()
-    in_table = filtered[mode.isin(["DIRECT", "CONSOLE"]) & filtered["SLAB"].notna()]
+    lodged = filtered["SLAB"].notna() if road_only else mode.isin(["DIRECT", "CONSOLE"]) & filtered["SLAB"].notna()
+    in_table = filtered[lodged]
     grand = (len(in_table), in_table["CHR_WT"].sum(), in_table["TOTAL_FRT"].sum())
 
     def pct(x, total):
@@ -152,7 +156,14 @@ def show_dashboard(df, key="dash"):
     headers = ["Lodge mode", "Lodgements", "Lodgement %", "CHR_WT", "Volume %", "TOTAL_FRT", "Cost %", "CPKG"]
 
     def pivot(first_header, parts):
-        """parts: (title, rows of in_table) -> one foldable group each: total on top, Console / Direct underneath."""
+        """parts: (title, rows of in_table) -> one foldable group each: total on top, Console / Direct underneath.
+        Road-only data: one plain row per part."""
+        if road_only:
+            html_table(
+                [first_header] + headers[1:], [[title] + cells(part) for title, part in parts],
+                total_row=["Grand Total"] + cells(in_table), group_starts=(1, 3, 5, 7), text_cols=(0,),
+            )
+            return
         groups = []
         for title, part in parts:
             pmode = part["LODGE_MODE"].astype(str).str.upper()
@@ -166,7 +177,7 @@ def show_dashboard(df, key="dash"):
 
     pivot("Slab", [(title, in_table[in_table["SLAB"].isin(slabs)]) for title, slabs in SLAB_GROUPS.items()])
 
-    other = filtered[~mode.isin(["DIRECT", "CONSOLE"])]
+    other = filtered[~mode.isin(["DIRECT", "CONSOLE"])] if not road_only else filtered.iloc[0:0]
     notes = []
     if len(other):
         split = other["LODGE_MODE"].value_counts().to_dict()
@@ -179,7 +190,7 @@ def show_dashboard(df, key="dash"):
 
     # ---------------- AGENT × MODE ----------------
     if filtered["AGENT"].nunique() > 1:
-        section("Agent-wise · Console vs Direct")
+        section("Agent-wise" + split_title)
         by_frt = in_table.groupby("AGENT")["TOTAL_FRT"].sum().sort_values(ascending=False).index
         pivot("Agent", [(a, in_table[in_table["AGENT"] == a]) for a in by_frt])
         agent_chart(in_table, list(by_frt), key)
