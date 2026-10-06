@@ -82,9 +82,10 @@ CSS = """
 .acl-table.green td:last-child b { color: #1E8449; }
 .acl-fold { cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 6px; }
 .acl-fold input { display: none; }
-.acl-caret::before { content: "⊟"; display: inline-block; width: 1.1em; font-size: 1.1em; color: #5B6B82; }
-.acl-fold-grp:has(.acl-fold input:checked) .acl-caret::before { content: "⊞"; }
-.acl-fold-grp:has(.acl-fold input:checked) tr.detail { display: none; }
+.acl-caret::before { content: "⊞"; display: inline-block; width: 1.1em; font-size: 1.1em; color: #5B6B82; }
+.acl-fold-grp:has(.acl-fold input:checked) .acl-caret::before { content: "⊟"; }
+.acl-fold-grp tr.detail { display: none; }  /* collapsed until clicked */
+.acl-fold-grp:has(.acl-fold input:checked) tr.detail { display: table-row; }
 .acl-muted { color: #8A97AB; }
 
 /* ---------- uploader ---------- */
@@ -228,7 +229,7 @@ def html_table(headers, rows, total_row=None, group_starts=(), text_cols=(0,), f
     tone: "red" / "green" tints the header and bold values.
     text_cols: left-aligned (non-number) columns.
     fold_groups: list of (summary_row, detail_rows) shown instead of `rows`; the
-    first cell of each summary row becomes a ⊟/⊞ toggle that hides its detail rows."""
+    first cell of each summary row becomes a ⊞/⊟ toggle; detail rows start hidden."""
     cls = _cell_cls(group_starts, text_cols)
     head = "".join(f"<th{cls(i)}>{h}</th>" for i, h in enumerate(headers))
     if fold_groups is None:
