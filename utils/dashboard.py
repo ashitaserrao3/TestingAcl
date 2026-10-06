@@ -233,7 +233,7 @@ def show_dashboard(df, key="dash", pdf_name="Dashboard.pdf", month=None):
                            {m: sd[sd["Measure"] == m]["Share"].tolist() for m in SHARE_COLORS},
                            {m: sd[sd["Measure"] == m]["Actual"].tolist() for m in SHARE_COLORS}))
 
-    # ---------------- LANES: costliest / cheapest by CPKG, high vs low volume ----------------
+    # ---------------- LANES: costliest / cheapest by CPKG ----------------
     lanes = (
         filtered.dropna(subset=["OD_PAIR"])
         .groupby("OD_PAIR")
@@ -243,9 +243,8 @@ def show_dashboard(df, key="dash", pdf_name="Dashboard.pdf", month=None):
     lanes = lanes[lanes["CHR_WT"] > 0]
     lanes["CPKG"] = lanes["TOTAL_FRT"] / lanes["CHR_WT"]
 
-    # split lanes into high / low volume (chargeable weight above / below the median lane)
-    high_vol = lanes[lanes["CHR_WT"] >= lanes["CHR_WT"].median()]
-    low_vol = lanes[lanes["CHR_WT"] < lanes["CHR_WT"].median()]
+    # only busy lanes count: above-average lodgements AND volume for the current filters
+    busy = lanes[(lanes["AWBs"] >= lanes["AWBs"].mean()) & (lanes["CHR_WT"] >= lanes["CHR_WT"].mean())]
 
     def lane_rows(top):
         if top.empty:
@@ -253,28 +252,16 @@ def show_dashboard(df, key="dash", pdf_name="Dashboard.pdf", month=None):
         return [[f"<b>{r.OD_PAIR}</b>", _n(r.AWBs), _n(r.CHR_WT), _n(r.TOTAL_FRT), f"<b>{_n(r.CPKG, 2)}</b>"]
                 for r in top.itertuples()]
 
-    def top_bottom(group):
-        """Costliest and cheapest 10 by CPKG; fewer than 20 lanes -> split so none shows in both."""
-        n_up, n_down = min(10, (len(group) + 1) // 2), min(10, len(group) // 2)
-        return group.nlargest(n_up, "CPKG"), group.nsmallest(n_down, "CPKG")
-
-    hv_up, hv_down = top_bottom(high_vol)
-    lv_up, lv_down = top_bottom(low_vol)
+    # fewer than 20 busy lanes -> split them so no lane shows in both tables
+    n_red, n_green = min(10, (len(busy) + 1) // 2), min(10, len(busy) // 2)
     lane_headers = ["Lane (OD)", "AWBs", WT_HEADER, FRT_HEADER, "CPKG"]
-    lane_tables = []
-    for (l_title, l_rows, tone), (r_title, r_rows, _) in [
-        (("Top 10 lanes · ↑ High vol · ↑ CPKG", hv_up, "red"), ("Top 10 lanes · ↓ Low vol · ↑ CPKG", lv_up, "red")),
-        (("Top 10 lanes · ↑ High vol · ↓ CPKG", hv_down, "green"), ("Top 10 lanes · ↓ Low vol · ↓ CPKG", lv_down, "green")),
-    ]:
-        left, right = st.columns(2)
-        with left:
-            section(l_title)
-            html_table(lane_headers, lane_rows(l_rows), tone=tone)
-        with right:
-            section(r_title)
-            html_table(lane_headers, lane_rows(r_rows), tone=tone)
-        lane_tables += [(t, lane_headers, [("", r) for r in lane_rows(rows)], tone)
-                        for t, rows in [(l_title, l_rows), (r_title, r_rows)]]
+    lane_tables = [("Top 10 lanes by ↑ CPKG", lane_rows(busy.nlargest(n_red, "CPKG")), "red"),
+                   ("Top 10 lanes by ↓ CPKG", lane_rows(busy.nsmallest(n_green, "CPKG")), "green")]
+    for col, (title, rows, tone) in zip(st.columns(2), lane_tables):
+        with col:
+            section(title)
+            html_table(lane_headers, rows, tone=tone)
+    lane_tables = [(title, lane_headers, [("", r) for r in rows], tone) for title, rows, tone in lane_tables]
     report.append(("lanes", lane_tables))
 
     # ---------------- PDF of everything above ----------------

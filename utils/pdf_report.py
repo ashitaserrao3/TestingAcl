@@ -7,7 +7,7 @@ turns those blocks into the same tables / chart on paper:
     ("table",  title, headers, rows, total_row)   rows: (kind, cells), kind = "sub" | "detail" | ""
     ("note",   text)
     ("chart",  title, agents, {measure: [share %, ...]}, {measure: [label, ...]})
-    ("lanes",  [(title, headers, rows, tone), ...])   four tables in a 2 x 2 grid
+    ("lanes",  [(title, headers, rows, tone), ...])   lane tables, two per row
 """
 
 import html
@@ -223,7 +223,7 @@ def build_pdf(report, title, subtitle_lines, colours):
             for l_title, headers, rows, tone in block[1]:
                 widths = [half * f for f in (0.24, 0.13, 0.21, 0.24, 0.18)]
                 cells.append([_section(l_title), _table(headers, rows, tone=tone, col_widths=widths)])
-            grid = Table([[cells[0], cells[1]], [cells[2], cells[3]]], colWidths=[half + 4 * mm] * 2,
+            grid = Table([cells[i:i + 2] for i in range(0, len(cells), 2)], colWidths=[half + 4 * mm] * 2,
                          hAlign="LEFT")
             grid.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
                                       ("LEFTPADDING", (0, 0), (-1, -1), 0),
