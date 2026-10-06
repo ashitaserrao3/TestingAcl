@@ -273,7 +273,7 @@ def show_dashboard(df, key="dash", pdf_name="Dashboard.pdf", month=None):
     # ---------------- PDF of everything above ----------------
     pdf_slot.download_button(
         "⬇  Download PDF", data=dashboard_pdf(report, filtered, key, month), file_name=pdf_name,
-        mime="application/pdf", key=f"{key}_pdf", width="stretch", on_click=log_event, args=("DOWNLOAD", pdf_name),
+        mime="application/pdf", key=f"{key}_pdf", type="primary", width="stretch", on_click=log_event, args=("DOWNLOAD", pdf_name),
     )
     return filtered
 
