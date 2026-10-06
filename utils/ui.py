@@ -63,22 +63,24 @@ CSS = """
 [data-testid="stMetricValue"] { font-size: 1.45rem !important; font-weight: 700; color: #14213D; }
 
 /* ---------- slab matrix ---------- */
-.acl-table { width: 100%; border-collapse: separate; border-spacing: 0; background: #fff;
-  border: 1px solid #DDE3EC; border-radius: 12px; overflow: hidden; font-size: .9rem; }
+.acl-table { width: 100%; border-collapse: separate !important; border-spacing: 0; background: #fff;
+  border: 1px solid #D3DBE7; border-top: 4px solid #1D4E89; border-radius: 12px; overflow: hidden;
+  font-size: .9rem; box-shadow: 0 1px 2px rgba(20,33,61,.05), 0 6px 18px rgba(20,33,61,.07); }
 .acl-table th { background: #F0F3F8; color: #33415C; font-weight: 600; text-align: right;
-  padding: 10px 14px; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
+  padding: 10px 14px; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em;
+  border-bottom: 1.5px solid #D3DBE7; }
 .acl-table th:first-child, .acl-table td:first-child { text-align: left; }
 .acl-table td { padding: 10px 14px; text-align: right; border-top: 1px solid #EEF1F6;
   font-variant-numeric: tabular-nums; }
-.acl-table tr.total td { font-weight: 700; background: #FAFBFD; }
+.acl-table tr.total td { font-weight: 700; background: #FAFBFD; border-top: 1.5px solid #C5CFDD; }
 .acl-table tr.sub td { font-weight: 600; background: #F5F7FB; }
 .acl-table .grp { border-left: 1px solid #E6EAF1; }
 .acl-table .txt { text-align: left; }
-.acl-table.red { border-color: #F1C4C9; }
-.acl-table.red th { background: #FDECEE; color: #9B1C2C; }
+.acl-table.red { border-color: #EDB3BB; border-top-color: #C8102E; }
+.acl-table.red th { background: #FDECEE; color: #9B1C2C; border-bottom-color: #EDB3BB; }
 .acl-table.red td:last-child b { color: #C8102E; }
-.acl-table.green { border-color: #BFE3CC; }
-.acl-table.green th { background: #E8F5EE; color: #1E6B3A; }
+.acl-table.green { border-color: #A9D8BA; border-top-color: #1E8449; }
+.acl-table.green th { background: #E8F5EE; color: #1E6B3A; border-bottom-color: #A9D8BA; }
 .acl-table.green td:last-child b { color: #1E8449; }
 .acl-fold { cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 6px; }
 .acl-fold input { display: none; }

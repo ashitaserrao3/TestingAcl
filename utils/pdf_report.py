@@ -33,9 +33,11 @@ MUTED = colors.HexColor("#5B6B82")
 LINE = colors.HexColor("#DDE3EC")
 HEAD_BG = colors.HexColor("#F0F3F8")
 SUB_BG = colors.HexColor("#F5F7FB")
-TONES = {"red": (colors.HexColor("#FDECEE"), colors.HexColor("#9B1C2C")),
-         "green": (colors.HexColor("#E8F5EE"), colors.HexColor("#1E6B3A")),
-         "": (HEAD_BG, colors.HexColor("#33415C"))}
+# tone -> (header background, header text, outline, accent strip on top)
+TONES = {"red": (colors.HexColor("#FDECEE"), colors.HexColor("#9B1C2C"), colors.HexColor("#EDB3BB"), RED),
+         "green": (colors.HexColor("#E8F5EE"), colors.HexColor("#1E6B3A"), colors.HexColor("#A9D8BA"),
+                   colors.HexColor("#1E8449")),
+         "": (HEAD_BG, colors.HexColor("#33415C"), colors.HexColor("#D3DBE7"), colors.HexColor("#1D4E89"))}
 
 # DejaVu has the ₹ sign (packages.txt installs it on Streamlit Cloud); without it fall back to "Rs"
 _DEJAVU = "/usr/share/fonts/truetype/dejavu/"
@@ -80,7 +82,7 @@ def _table(headers, rows, total=None, tone="", font_size=7.5, col_widths=None, t
         data.append([_plain(c) for c in total])
         kinds.append("total")
 
-    head_bg, head_ink = TONES[tone]
+    head_bg, head_ink, outline, accent = TONES[tone]
     style = [
         ("FONT", (0, 0), (-1, -1), FONT, font_size),
         ("FONT", (0, 0), (-1, 0), BOLD, font_size - 0.5),
@@ -90,7 +92,9 @@ def _table(headers, rows, total=None, tone="", font_size=7.5, col_widths=None, t
         ("ALIGN", (text_cols, 0), (-1, -1), "RIGHT"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LINEBELOW", (0, 0), (-1, -1), 0.4, LINE),
-        ("BOX", (0, 0), (-1, -1), 0.6, LINE),
+        ("LINEBELOW", (0, 0), (-1, 0), 1, outline),
+        ("BOX", (0, 0), (-1, -1), 0.8, outline),
+        ("LINEABOVE", (0, 0), (-1, 0), 2.5, accent),
         ("TOPPADDING", (0, 0), (-1, -1), 3.5),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
         ("LEFTPADDING", (0, 0), (-1, -1), 5),
