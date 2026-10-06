@@ -1,8 +1,12 @@
+import hashlib
+from pathlib import Path
+
 import altair as alt
 import pandas as pd
 import streamlit as st
 
 from utils.activity_log import log_event
+from utils import pdf_report
 from utils.pdf_report import build_pdf
 from utils.ui import html_table, section
 
@@ -25,6 +29,8 @@ def _options(df, col):
 def _n(x, dp=0):
     return f"{x:,.{dp}f}"
 
+
+_CODE_VERSION = hashlib.md5(Path(__file__).read_bytes() + Path(pdf_report.__file__).read_bytes()).hexdigest()
 
 # on-screen names for the CHR_WT / TOTAL_FRT columns (the Excel export keeps the standard names)
 WT_HEADER, FRT_HEADER = "Charged Weight", "Total Freight"
@@ -273,13 +279,15 @@ def show_dashboard(df, key="dash", pdf_name="Dashboard.pdf", month=None):
 
 
 def dashboard_pdf(report, filtered, key, month):
-    """PDF bytes for the current view; built once per filter combination and kept for the session."""
+    """PDF bytes for the current view; built once per view and kept for the session."""
     filters = [f"{FILTER_LABELS[c]}: {st.session_state[f'{key}_{c}']}" for c in FILTER_COLS
                if st.session_state.get(f"{key}_{c}") not in (None, "All")]
     agents = sorted(filtered["AGENT"].dropna().unique())
     subtitle = [", ".join(agents) or "No agents", month or "All months"] + (filters or ["No filters"])
     cache = st.session_state.setdefault(f"{key}_pdf_cache", {})
-    sig = (tuple(subtitle), len(filtered), float(filtered["TOTAL_FRT"].sum()))
+    # keyed on everything that goes into the PDF, plus the code version, so an app update never
+    # hands back a PDF built by older code
+    sig = hashlib.md5(repr((_CODE_VERSION, subtitle, report)).encode()).hexdigest()
     if sig not in cache:
         cache.clear()
         cache[sig] = build_pdf(report, "Freight Dashboard", subtitle, SHARE_COLORS)
