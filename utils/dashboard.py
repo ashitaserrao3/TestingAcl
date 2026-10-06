@@ -27,7 +27,7 @@ def _n(x, dp=0):
 
 
 # on-screen names for the CHR_WT / TOTAL_FRT columns (the Excel export keeps the standard names)
-WT_HEADER, FRT_HEADER = "Chg. Wt (kg)", "Total Frt (₹)"
+WT_HEADER, FRT_HEADER = "Charged Weight", "Total Frt (₹)"
 
 FILTER_COLS = ["AGENT", "ORIGIN", "DEST", "BILL_PERIOD", "TRNSPT_MODE"]
 FILTER_LABELS = {"AGENT": "Agent", "ORIGIN": "Origin", "DEST": "Destination", "BILL_PERIOD": "Bill period",

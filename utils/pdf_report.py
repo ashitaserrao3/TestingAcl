@@ -225,7 +225,7 @@ def build_pdf(report, title, subtitle_lines, colours):
             half = (width - 8 * mm) / 2
             cells = []
             for l_title, headers, rows, tone in block[1]:
-                widths = [half * f for f in (0.24, 0.13, 0.21, 0.24, 0.18)]
+                widths = [half * f for f in (0.20, 0.12, 0.26, 0.24, 0.18)]
                 cells.append([_section(l_title), _table(headers, rows, tone=tone, col_widths=widths)])
             grid = Table([cells[i:i + 2] for i in range(0, len(cells), 2)], colWidths=[half + 4 * mm] * 2,
                          hAlign="LEFT")
