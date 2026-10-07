@@ -33,8 +33,8 @@ CSS = """
 /* ---------- top brand bar ---------- */
 .acl-topbar {
   display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-  background: var(--acl-surface); color: var(--acl-ink); border: 1px solid var(--acl-line);
-  border-radius: 16px; padding: 14px 20px; margin-bottom: 1.6rem; box-shadow: var(--acl-shadow);
+  background: linear-gradient(90deg, #DCEFFC 0%, var(--acl-sky) 100%); color: var(--acl-ink);
+  border: 1px solid var(--acl-sky-line); border-radius: 16px; padding: 14px 20px; margin-bottom: 1.6rem; box-shadow: var(--acl-shadow);
 }
 .acl-brand { display: flex; align-items: center; gap: 14px; }
 .acl-logo {
@@ -44,8 +44,8 @@ CSS = """
 }
 .acl-brand-name { font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; line-height: 1.1; color: var(--acl-navy); }
 .acl-brand-sub  { font-size: .8rem; color: var(--acl-muted); margin-top: 3px; }
-.acl-topbar-right { font-size: .8rem; font-weight: 500; color: var(--acl-ink-2); background: var(--acl-bg);
-  border: 1px solid var(--acl-line); border-radius: 999px; padding: 6px 14px; white-space: nowrap; }
+.acl-topbar-right { font-size: .8rem; font-weight: 500; color: var(--acl-ink-2); background: rgba(255,255,255,.75);
+  border: 1px solid var(--acl-sky-line); border-radius: 999px; padding: 6px 14px; white-space: nowrap; }
 
 /* ---------- page title ---------- */
 .acl-page-title { margin: .2rem 0 1.1rem; }
