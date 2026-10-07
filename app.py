@@ -51,7 +51,7 @@ except ModuleNotFoundError as e:
 # PAGE CONFIG  (only place set_page_config is called)
 # =====================================================
 
-st.set_page_config(page_title="ACL Dummy", page_icon="✈️", layout="wide")
+st.set_page_config(page_title="ACL Air Cargo Bills", page_icon="✈️", layout="wide")
 apply_css()
 
 # =====================================================

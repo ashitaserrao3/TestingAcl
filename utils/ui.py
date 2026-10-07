@@ -206,7 +206,7 @@ def topbar(right_text=""):
         f"""<div class="acl-topbar">
               <div class="acl-brand">
                 <div class="acl-logo">{PLANE}</div>
-                <div><div class="acl-brand-name">ACL Dummy</div>
+                <div><div class="acl-brand-name">ACL Air Cargo Bills</div>
                      <div class="acl-brand-sub">Freight bill processing &amp; CPKG analysis</div></div>
               </div>
               <div class="acl-topbar-right">{esc(right_text)}</div>
@@ -219,7 +219,7 @@ def login_header():
     st.markdown(
         f"""<div class="acl-login-head">
              <div class="acl-logo">{PLANE}</div>
-             <h1>ACL Dummy</h1>
+             <h1>ACL Air Cargo Bills</h1>
              <p>Sign in to process agent freight bills</p>
            </div>""",
         unsafe_allow_html=True,
@@ -234,7 +234,7 @@ def login_footer():
 def sidebar_brand(name, username):
     st.sidebar.markdown(
         f"""<div class="acl-side-brand"><div class="acl-logo">{PLANE}</div>
-              <div class="acl-side-name">ACL Dummy</div></div>
+              <div class="acl-side-name">ACL Air Cargo Bills</div></div>
             <div class="acl-user"><span>Signed in as</span><b>{esc(name)}</b><span>@{esc(username)}</span></div>""",
         unsafe_allow_html=True,
     )
