@@ -169,15 +169,15 @@ def show_dashboard(df, key="dash", pdf_name="Dashboard.pdf", month=None):
     report.append(("kpis", kpis))
 
     # ---------------- SLAB × MODE ----------------
-    # Road has no Console / Direct, so road-only data gets plain tables without that split
-    road_only = len(filtered) > 0 and (filtered["TRNSPT_MODE"].astype(str).str.upper() == "ROAD").all()
-    split_title = "" if road_only else " · Console vs Direct"
+    # the Console / Direct split only applies to air: shown when Transport mode = AIR, plain tables otherwise
+    air_split = str(st.session_state.get(f"{key}_TRNSPT_MODE", "")).upper() == "AIR"
+    split_title = " · Console vs Direct" if air_split else ""
     slab_title = "Slab-wise" + split_title
     section(slab_title)
     # every filtered row is in the tables, so the Grand Total always matches the KPI boxes above
     in_table = filtered
     grand = (len(in_table), in_table["CHR_WT"].sum(), in_table["TOTAL_FRT"].sum())
-    # sub-row per slab / agent: Console and Direct, plus Road and Other when the data has any
+    # sub-row per slab / agent: Console and Direct, plus Other when the air data has any
     mode = filtered["LODGE_MODE"].astype(str).str.upper()
     category = pd.Series("Other", index=filtered.index)
     category[mode == "CONSOLE"], category[mode == "DIRECT"] = "Console", "Direct"
@@ -196,8 +196,8 @@ def show_dashboard(df, key="dash", pdf_name="Dashboard.pdf", month=None):
 
     def pivot(table_title, first_header, parts):
         """parts: (title, rows of in_table) -> one foldable group each: total on top, Console / Direct
-        (and Road / Other) underneath. Road-only data: one plain row per part."""
-        if road_only:
+        (and Other) underneath. Not filtered to AIR: one plain row per part."""
+        if not air_split:
             rows = [[title] + cells(part) for title, part in parts]
             total = ["Grand Total"] + cells(in_table)
             html_table([first_header] + headers[1:], rows, total_row=total, group_starts=(1, 3, 5, 7), text_cols=(0,))
@@ -222,7 +222,7 @@ def show_dashboard(df, key="dash", pdf_name="Dashboard.pdf", month=None):
     pivot(slab_title, "Slab", slab_parts)
 
     notes = []
-    if "Other" in sub_rows:
+    if air_split and "Other" in sub_rows:
         notes.append("Other = air shipments whose lodge mode is not Console or Direct")
     if in_table["SLAB"].isna().any():
         notes.append("No weight = rows without chargeable weight (their freight is counted, so CPKG matches the totals)")
