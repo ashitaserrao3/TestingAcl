@@ -123,8 +123,8 @@ def agent_chart(in_table, agents, key):
     """'View' button under the agent table -> share-% bars per agent."""
     if not view_toggle(key, "agent_chart", in_table, "📊 View", "Hide chart"):
         return
-    if in_table.empty:  # e.g. Road: no Console / Direct rows to chart
-        st.caption("No Console / Direct shipments for these filters, so there is nothing to chart.")
+    if in_table.empty:
+        st.caption("No shipments for these filters, so there is nothing to chart.")
         return
     shares = share_data(in_table, agents)
 
@@ -174,10 +174,15 @@ def show_dashboard(df, key="dash", pdf_name="Dashboard.pdf", month=None):
     split_title = "" if road_only else " · Console vs Direct"
     slab_title = "Slab-wise" + split_title
     section(slab_title)
-    mode = filtered["LODGE_MODE"].astype(str).str.upper()
-    lodged = filtered["SLAB"].notna() if road_only else mode.isin(["DIRECT", "CONSOLE"]) & filtered["SLAB"].notna()
-    in_table = filtered[lodged]
+    # every filtered row is in the tables, so the Grand Total always matches the KPI boxes above
+    in_table = filtered
     grand = (len(in_table), in_table["CHR_WT"].sum(), in_table["TOTAL_FRT"].sum())
+    # sub-row per slab / agent: Console and Direct, plus Road and Other when the data has any
+    mode = filtered["LODGE_MODE"].astype(str).str.upper()
+    category = pd.Series("Other", index=filtered.index)
+    category[mode == "CONSOLE"], category[mode == "DIRECT"] = "Console", "Direct"
+    category[filtered["TRNSPT_MODE"].astype(str).str.upper() == "ROAD"] = "Road"
+    sub_rows = ["Console", "Direct"] + [c for c in ("Road", "Other") if (category == c).any()]
 
     def pct(x, total):
         return f"{x / total:.0%}" if total else "–"
@@ -185,13 +190,13 @@ def show_dashboard(df, key="dash", pdf_name="Dashboard.pdf", month=None):
     def cells(part):
         n, wt, frt = len(part), part["CHR_WT"].sum(), part["TOTAL_FRT"].sum()
         return [_n(n), pct(n, grand[0]), _n(wt), pct(wt, grand[1]), _n(frt), pct(frt, grand[2]),
-                _n(_cpkg(part), 2) if n else '<span class="acl-muted">–</span>']
+                _n(_cpkg(part), 2) if wt else '<span class="acl-muted">–</span>']
 
     headers = ["Lodge mode", "Lodgements", "Lodgement %", WT_HEADER, "Volume %", FRT_HEADER, "Cost %", "CPKG"]
 
     def pivot(table_title, first_header, parts):
-        """parts: (title, rows of in_table) -> one foldable group each: total on top, Console / Direct underneath.
-        Road-only data: one plain row per part."""
+        """parts: (title, rows of in_table) -> one foldable group each: total on top, Console / Direct
+        (and Road / Other) underneath. Road-only data: one plain row per part."""
         if road_only:
             rows = [[title] + cells(part) for title, part in parts]
             total = ["Grand Total"] + cells(in_table)
@@ -200,9 +205,7 @@ def show_dashboard(df, key="dash", pdf_name="Dashboard.pdf", month=None):
             return
         groups = []
         for title, part in parts:
-            pmode = part["LODGE_MODE"].astype(str).str.upper()
-            details = [["", label] + cells(part[pmode == name])
-                       for name, label in [("CONSOLE", "Console"), ("DIRECT", "Direct")]]
+            details = [["", label] + cells(part[category[part.index] == label]) for label in sub_rows]
             groups.append(([title, ""] + cells(part), details))
         total = ["Grand Total", ""] + cells(in_table)
         html_table(
@@ -213,19 +216,19 @@ def show_dashboard(df, key="dash", pdf_name="Dashboard.pdf", month=None):
                     for row in [("sub", summary)] + [("detail", d) for d in details]]
         report.append(("table", table_title, [first_header] + headers, pdf_rows, total))
 
-    pivot(slab_title, "Slab", [(title, in_table[in_table["SLAB"].isin(slabs)]) for title, slabs in SLAB_GROUPS.items()])
+    slab_parts = [(title, in_table[in_table["SLAB"].isin(slabs)]) for title, slabs in SLAB_GROUPS.items()]
+    if in_table["SLAB"].isna().any():
+        slab_parts.append(("No weight", in_table[in_table["SLAB"].isna()]))
+    pivot(slab_title, "Slab", slab_parts)
 
-    other = filtered[~mode.isin(["DIRECT", "CONSOLE"])] if not road_only else filtered.iloc[0:0]
     notes = []
-    if len(other):
-        split = other["LODGE_MODE"].value_counts().to_dict()
-        notes.append(f"{len(other):,} rows not Direct/Console ({', '.join(f'{k}: {v}' for k, v in split.items())})")
-    no_slab = int(filtered["SLAB"].isna().sum())
-    if no_slab:
-        notes.append(f"{no_slab:,} rows without weight")
+    if "Other" in sub_rows:
+        notes.append("Other = air shipments whose lodge mode is not Console or Direct")
+    if in_table["SLAB"].isna().any():
+        notes.append("No weight = rows without chargeable weight (their freight is counted, so CPKG matches the totals)")
     if notes:
-        st.caption("Not in the table above: " + " · ".join(notes))
-        report.append(("note", "Not in the table above: " + " · ".join(notes)))
+        st.caption(" · ".join(notes))
+        report.append(("note", " · ".join(notes)))
 
     # ---------------- AGENT × MODE ----------------
     if filtered["AGENT"].nunique() > 1:
