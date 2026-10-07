@@ -293,5 +293,5 @@ def dashboard_pdf(report, filtered, key, month):
     sig = hashlib.md5(repr((_CODE_VERSION, subtitle, report)).encode()).hexdigest()
     if sig not in cache:
         cache.clear()
-        cache[sig] = build_pdf(report, "Freight Dashboard", subtitle, SHARE_COLORS)
+        cache[sig] = build_pdf(report, "ACL Air Cargo Bills", subtitle, SHARE_COLORS)
     return cache[sig]
