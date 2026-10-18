@@ -7,3 +7,11 @@ config.yaml
 outputs/
 .DS_Store
 !.streamlit/config.toml
+
+# Uploaded schedule / tariff files and the database built from them
+data/
+instance/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.pytest_cache/

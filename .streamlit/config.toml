@@ -1,5 +1,9 @@
 # App look & feel (committed to git; secrets.toml stays private)
 
+[server]
+# Rate lists are a few MB each; leave room for the schedule PDFs too.
+maxUploadSize = 100
+
 [client]
 toolbarMode = "minimal"        # hides the Deploy button / developer menu
 showSidebarNavigation = false
