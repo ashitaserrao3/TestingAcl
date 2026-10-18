@@ -8,8 +8,7 @@ outputs/
 .DS_Store
 !.streamlit/config.toml
 
-# Uploaded schedule / tariff files and the database built from them
-data/
+# The database built from the data folder
 instance/
 *.sqlite
 *.sqlite-wal

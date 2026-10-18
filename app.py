@@ -2,19 +2,14 @@ import copy
 import datetime as dt
 import hashlib
 import html
-import io
 import os
 import re
-import zipfile
 
-import openpyxl
 import streamlit as st
 import streamlit_authenticator as stauth
 
 import allcargo
-import store
 from tariffapp import database_path, db, queries, sync
-from tariffapp.etl import parsers
 from tariffapp.linker import STATUS_CHECK, STATUS_NO_RATE, STATUS_NO_TARIFF, TariffEngine
 
 st.set_page_config(page_title="Flight Schedule", page_icon="✈️", layout="wide")
@@ -75,11 +70,9 @@ if not st.session_state.get("authentication_status"):
 
 # =====================================================
 # SIGNED IN: FLIGHT SCHEDULE
-# Everyone who signs in sees the schedule. Only ADMIN_USER gets the sidebar
-# to upload the schedule and tariff rates it is built from.
+# Everyone who signs in sees the schedule, built from the files in data/
+# (see README). To change the data, replace those files in GitHub.
 # =====================================================
-
-ADMIN_USER = "ashita"
 
 # Colours taken from the workbook's own formatting
 NAVY, BLUE, GREEN_DARK = "#1F4E78", "#2E74B5", "#375623"
@@ -155,31 +148,10 @@ def num(v):
     return f"{v:g}" if float(v) == int(v) else f"{v:.2f}"
 
 
-def github_store():
-    """The GitHub branch the uploads are kept on, or None when [github] isn't in Secrets."""
-    cfg = st.secrets.get("github", {})
-    if not cfg.get("token"):
-        return None
-    return store.GitHubStore(cfg["token"], cfg.get("repo", "ashitaserrao3/TestingAcl"), cfg.get("branch", "data"))
-
-
-@st.cache_resource(show_spinner="Loading the saved schedule and tariff files…")
-def restore_uploads():
-    """Once per app start: bring back the files Ashita last uploaded. Returns an error message or None."""
-    gh = github_store()
-    if gh is None:
-        return None
-    try:
-        gh.pull(sync.data_dir())
-    except Exception as e:  # noqa: BLE001 - shown to Ashita; the app still runs on what it has
-        return f"Couldn't load the saved files from GitHub: {e}"
-    return None
-
-
 @st.cache_resource(show_spinner="Loading the latest data…", max_entries=1)
 def build_database(signature):
     """A fresh database from exactly the files in the data folder, shared by every visitor and rebuilt
-    whenever the files change - so the schedule always shows the latest upload and nothing older."""
+    whenever the files change - so the schedule always shows exactly the files in data/."""
     name = hashlib.sha1(repr(signature).encode()).hexdigest()[:12]
     path = os.path.join(os.path.dirname(database_path()), f"tariff-{name}.sqlite")
     tmp = path + ".tmp"
@@ -195,16 +167,16 @@ def build_database(signature):
         c.close()
     os.replace(tmp, path)
     folder = os.path.dirname(path)
-    for f in os.listdir(folder):  # databases built from older uploads
+    for f in os.listdir(folder):  # databases built from older files
         if f.startswith("tariff-") and not f.startswith(os.path.basename(path)):
             os.remove(os.path.join(folder, f))
     return path, result
 
 
 def data_signature():
-    """Changes whenever any uploaded file is added, replaced or removed."""
-    files = store.local_files(sync.data_dir()) if os.path.isdir(sync.data_dir()) else {}
-    return tuple(sorted((rel, os.path.getsize(p), int(os.path.getmtime(p))) for rel, p in files.items()))
+    """Changes whenever a file in the data folder is added, replaced or removed."""
+    paths = [os.path.join(root, n) for root, _, names in os.walk(sync.data_dir()) for n in names]
+    return tuple(sorted((p, os.path.getsize(p), int(os.path.getmtime(p))) for p in paths))
 
 
 def newest(folder, extensions):
@@ -234,155 +206,14 @@ def load_extras(signature):
     return quote, special, errors
 
 
-def clean_name(name):
-    return re.sub(r'[\\/:*?"<>|]+', "_", os.path.basename(name)).strip() or "upload"
-
-
-def expand(uploads):
-    """[(name, bytes)] for the uploaded files, with .zip files unpacked."""
-    out = []
-    for f in uploads:
-        if f.name.lower().endswith(".zip"):
-            with zipfile.ZipFile(f) as z:
-                for info in z.infolist():
-                    base = os.path.basename(info.filename)
-                    if info.is_dir() or not base or base.startswith((".", "~$")) or "__MACOSX" in info.filename:
-                        continue
-                    out.append((clean_name(base), z.read(info)))
-        else:
-            out.append((clean_name(f.name), f.getvalue()))
-    return out
-
-
-def replace_files(folder, items, old_extensions):
-    """Remove the folder's previous files of these types, then write the new ones."""
-    if items and os.path.isdir(folder):
-        for name in os.listdir(folder):
-            if name.lower().endswith(old_extensions):
-                os.remove(os.path.join(folder, name))
-    os.makedirs(folder, exist_ok=True)
-    for name, data in items:
-        with open(os.path.join(folder, name), "wb") as out:
-            out.write(data)
-
-
-def save_schedule(items):
-    """DGCA PDFs replace all the previous PDFs; a workbook replaces the previous workbook."""
-    base = os.path.join(sync.data_dir(), "schedule")
-    pdfs = [i for i in items if i[0].lower().endswith(".pdf")]
-    books = [i for i in items if i[0].lower().endswith(sync.XLSX)]
-    replace_files(os.path.join(base, "dgca"), pdfs, (".pdf", ".csv"))
-    replace_files(base, books, sync.XLSX)
-    return [n for n, _ in items if not n.lower().endswith((".pdf",) + sync.XLSX)]
-
-
-def rate_carrier(source, name):
-    try:
-        return parsers.detect_carrier(name, openpyxl.load_workbook(source, read_only=True).sheetnames)
-    except Exception:  # noqa: BLE001 - unreadable file: the loader reports it
-        return None
-
-
-def save_rates(items):
-    """The Allcargo sheet and the Akasa special-rates PDF replace their previous versions; an airline's
-    tariff replaces the previous tariff for the same airline."""
-    base = sync.data_dir()
-    special = [i for i in items if i[0].lower().endswith(".pdf")]
-    books = [i for i in items if i[0].lower().endswith(sync.XLSX)]
-    quotes = [i for i in books if allcargo.is_quote(io.BytesIO(i[1]))]
-    tariffs = [i for i in books if i not in quotes]
-    replace_files(os.path.join(base, "special"), special, (".pdf",))
-    replace_files(os.path.join(base, "allcargo"), quotes, sync.XLSX)
-    folder = os.path.join(base, "rates")
-    new = {rate_carrier(io.BytesIO(data), name) for name, data in tariffs} - {None}
-    if os.path.isdir(folder):
-        for name in os.listdir(folder):
-            if rate_carrier(os.path.join(folder, name), name) in new:
-                os.remove(os.path.join(folder, name))
-    replace_files(folder, tariffs, ())
-    return [n for n, _ in items if not n.lower().endswith((".pdf",) + sync.XLSX)]
-
-
-def apply_upload(save, uploads, what):
-    """Save the files, rebuild the schedule from them, then keep them on GitHub for after a restart."""
-    items = expand(uploads)
-    skipped = save(items)
-    sig = data_signature()
-    _, result = build_database(sig)
-    extras_errors = load_extras(sig)[2]
-    gh = github_store()
-    saved = None
-    if gh is not None:
-        try:
-            with st.spinner("Saving to GitHub…"):
-                gh.push(sync.data_dir(), f"Upload {what}: " + ", ".join(n for n, _ in items))
-            saved = True
-        except Exception as e:  # noqa: BLE001 - shown to Ashita
-            saved = f"{e}"
-    ss["_upload_report"] = (result, saved, [n for n, _ in items if n not in skipped], skipped, extras_errors)
-    st.rerun()
-
-
 ss = st.session_state
-is_admin = ss.get("username") == ADMIN_USER
 today = dt.date.today()
 
-restore_error = restore_uploads()
 signature = data_signature()
 db_path, sync_result = build_database(signature)
 quote, special, extras_errors = load_extras(signature)
 conn = db.connect(db_path)
 sched_info = queries.schedule_info(conn, today)
-
-if is_admin:
-    with st.sidebar:
-        st.header("Upload")
-        with st.form("schedule", clear_on_submit=True, border=False):
-            scheds = st.file_uploader("Upload schedule", type=["pdf", "xlsx", "xlsm", "zip"],
-                                      accept_multiple_files=True,
-                                      help="DGCA approved-schedule PDFs (or a .zip of them) give the flights; "
-                                           "upload every airline's PDF together, they replace the previous ones. "
-                                           "Reading them takes a few minutes. The ATC/AOC schedule workbook gives "
-                                           "station names, and replaces the previous one.")
-            if st.form_submit_button("Load schedule", width="stretch") and scheds:
-                apply_upload(save_schedule, scheds, "schedule")
-        with st.form("rates", clear_on_submit=True, border=False):
-            files = st.file_uploader("Upload tariff rates", type=["xlsx", "pdf", "zip"], accept_multiple_files=True,
-                                     help="Airline tariffs (.xlsx: IndiGo, Air India, Akasa, SpiceJet, Star Air), "
-                                          "the Allcargo rate quotation (.xlsx) for Terminal & Surcharges, and the "
-                                          "Akasa special rates (.pdf), or a .zip of them. Each file replaces the "
-                                          "previous one of its kind (same airline for tariffs).")
-            if st.form_submit_button("Load tariff rates", width="stretch") and files:
-                apply_upload(save_rates, files, "tariff rates")
-        # Say what happened only right after an upload, not on every page view.
-        report = ss.pop("_upload_report", None)
-        if report:
-            result, saved, received, skipped, _ = report
-            st.success("Received: " + "; ".join(received))
-            if skipped:
-                st.warning("Not used (unknown file type): " + "; ".join(skipped))
-            if saved is True:
-                st.success("Saved. Everyone sees this data until you upload again.")
-            elif saved:
-                st.error(f"Showing the new data, but it couldn't be saved to GitHub, so it will be lost when the "
-                         f"app restarts: {saved}")
-        for e in sync_result["errors"] + extras_errors:
-            st.error(e)
-        if restore_error:
-            st.error(restore_error)
-        if github_store() is None:
-            st.warning("Saving is off: add the [github] section to Streamlit Secrets (see secrets.toml.example). "
-                       "Until then, uploads are lost when the app restarts.")
-        st.divider()
-        st.caption("**Rates in use**")
-        for carrier, b in queries.latest_batches(conn).items():
-            st.caption(f"{carrier}: eff. {dmy(b['EffectiveDate'])}" if b else f"{carrier}: none loaded")
-        st.caption(f"Allcargo T&S: {quote['file']}" if quote else "Allcargo T&S: none loaded")
-        st.caption(f"Akasa special: {special['file']}" if special else "Akasa special: none loaded")
-        st.caption(f"Schedule: {sched_info['label']} · {sched_info['flights']:,} flights")
-        if sched_info["expired"]:
-            st.warning(f"The {sched_info['label']} schedule ended on {dmy(sched_info['valid_to'])}. Flights are "
-                       "shown as on its last day. Upload the new season's DGCA schedule PDFs.")
 
 top = st.columns([6, 2, 1], vertical_alignment="center")
 top[1].caption(f"Signed in as **{esc(ss.get('name'))}**")
@@ -394,8 +225,7 @@ if not ss.get("authentication_status"):
 hubs, stations = queries.stations(conn)
 if not stations:
     st.html(SHEET_CSS + TITLE)
-    st.info("No data yet. Upload the schedule and the tariff rates from the sidebar." if is_admin else
-            "No data yet. The flight schedule appears here once the schedule and tariff rates are uploaded.")
+    st.info("No data yet. Add the schedule and tariff files to the data folder (see README).")
     st.stop()
 
 eng = TariffEngine(conn, today)
@@ -441,8 +271,7 @@ msg = {"SAME CITY": "⚠&nbsp; Please select two different cities as Origin and 
        "NO SERVICE": "✈&nbsp; No nonstop flights currently operate on this route. "
                      "Please try a different Origin / Destination combination."}.get(status, "")
 if status == "ACTIVE" and not quote:
-    msg = ("Terminal & Surcharges aren't loaded yet, so CPKG is blank. "
-           + ("Upload the Allcargo sheet under Upload tariff rates." if is_admin else ""))
+    msg = "Terminal & Surcharges aren't loaded yet, so CPKG is blank. Add the Allcargo sheet to data/allcargo."
 
 
 def price(r):

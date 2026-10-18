@@ -13,17 +13,20 @@ Allcargo rate quotation, for that flight: its own flight-number row, else the ro
 listed under the table.
 
 * Everyone must sign in. Everyone who signs in sees the Flight Schedule.
-* Only the `ashita` account gets the sidebar with the two uploads (a .zip of the
-  files works too):
-  * **Upload schedule** – the DGCA approved-schedule PDFs, one per airline. Upload all
-    of them together; they replace the previous ones. Reading them takes a few minutes.
-  * **Upload tariff rates** – the airline tariffs (.xlsx: IndiGo, Air India, Akasa,
-    SpiceJet, Star Air), the Allcargo rate quotation (.xlsx) and the Akasa special
-    rates (.pdf). Each file replaces the previous one of its kind (same airline for
-    tariffs). Keep the airline's file name; the effective date is read from it.
-* The uploaded files are kept on this repo's `data` branch (needs the `[github]`
-  section in Secrets, see `secrets.toml.example`), so everyone sees the same data,
-  even after the app restarts, until Ashita uploads again.
+
+## The data
+The app reads these files from the `data/` folder:
+
+| Folder | Files |
+|---|---|
+| `data/schedule/dgca/` | DGCA approved-schedule PDFs, one per airline. `schedule.csv` is the app's saved reading of them; it is re-made automatically when the PDFs change (takes a few minutes). |
+| `data/rates/` | Airline tariffs (.xlsx): IndiGo, Air India, Akasa, SpiceJet, Star Air. Keep the airline's file name; the effective date is read from it. |
+| `data/allcargo/` | The Allcargo rate quotation (.xlsx) – Terminal & Surcharges. |
+| `data/special/` | The Akasa special rates (.pdf). |
+
+**To change the data:** on GitHub open the folder, click *Add file → Upload files*,
+drop in the new file, delete the old one, and *Commit changes*. Streamlit Cloud
+redeploys the app in about a minute with the new data.
 
 The rate and schedule engine (`tariffapp/`) is copied from the TarrifApp repo.
 
