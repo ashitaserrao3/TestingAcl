@@ -61,23 +61,31 @@ def _clean_for_excel(df):
     return out
 
 
-def export_excel(df, sheet_name="Data"):
+EXCLUDED_SHEET = "Excluded_Issues"
+
+
+def export_excel(df, sheet_name="Data", excluded=None):
+    """df = clean rows; excluded = rows left out for a DATA_ISSUE (own sheet, only if any)."""
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         _write_sheet(writer, _clean_for_excel(df), sheet_name[:31])
+        if excluded is not None and len(excluded):
+            _write_sheet(writer, _clean_for_excel(excluded), EXCLUDED_SHEET)
     output.seek(0)
     return output
 
 
-def export_multi(df, summary_by="AGENT"):
+def export_multi(df, excluded=None):
     """
     Multi-Agent workbook:
-      Summary  - Excel formulas (COUNTIFS/SUMIFS) over the All_Data sheet,
-                 so numbers recalculate if rows are edited or filtered out.
-      All_Data - every row
-      <AGENT>  - one sheet per agent
+      Summary         - Excel formulas (COUNTIFS/SUMIFS) over the All_Data sheet,
+                        so numbers recalculate if rows are edited or filtered out.
+      All_Data        - every clean row
+      <AGENT>         - one sheet per agent
+      Excluded_Issues - rows left out because of a DATA_ISSUE (only if any)
     """
     data = _clean_for_excel(df)
+    bad = _clean_for_excel(excluded) if excluded is not None and len(excluded) else None
     output = BytesIO()
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -87,6 +95,8 @@ def export_multi(df, summary_by="AGENT"):
 
         for agent, part in data.groupby("AGENT", sort=True):
             _write_sheet(writer, part, str(agent).replace("/", "-")[:31])
+        if bad is not None:
+            _write_sheet(writer, bad, EXCLUDED_SHEET)
 
         ws = writer.sheets["Summary"]
         cols = {c: get_column_letter(i + 1) for i, c in enumerate(data.columns)}
@@ -95,20 +105,26 @@ def export_multi(df, summary_by="AGENT"):
         def rng(col):
             return f"All_Data!${cols[col]}$2:${cols[col]}${last}"
 
-        headers = ["AGENT", "AWBs", "CHR_WT", "TOTAL_FRT", "CPKG", "Rows with DATA_ISSUE", "Rows with DUP_FLAG"]
+        headers = ["AGENT", "AWBs", "CHR_WT", "TOTAL_FRT", "CPKG", "Rows left out (DATA_ISSUE)", "Rows with DUP_FLAG"]
         for i, h in enumerate(headers, start=1):
             c = ws.cell(row=1, column=i, value=h)
             c.fill = HEADER_FILL
             c.font = HEADER_FONT
 
-        agents = sorted(data["AGENT"].dropna().unique().tolist())
+        agent_names = data["AGENT"].dropna().tolist() + ([] if bad is None else bad["AGENT"].dropna().tolist())
+        agents = sorted(set(agent_names))
         for r, agent in enumerate(agents, start=2):
             ws.cell(row=r, column=1, value=agent)
             ws.cell(row=r, column=2, value=f'=COUNTIFS({rng("AGENT")},$A{r})')
             ws.cell(row=r, column=3, value=f'=SUMIFS({rng("CHR_WT")},{rng("AGENT")},$A{r})')
             ws.cell(row=r, column=4, value=f'=SUMIFS({rng("TOTAL_FRT")},{rng("AGENT")},$A{r})')
             ws.cell(row=r, column=5, value=f'=IFERROR(D{r}/C{r},0)')
-            ws.cell(row=r, column=6, value=f'=COUNTIFS({rng("AGENT")},$A{r},{rng("DATA_ISSUE")},"<>")')
+            if bad is None:
+                ws.cell(row=r, column=6, value=0)
+            else:
+                ex = get_column_letter(bad.columns.get_loc("AGENT") + 1)
+                ex_rng = f"{EXCLUDED_SHEET}!${ex}$2:${ex}${len(bad) + 1}"
+                ws.cell(row=r, column=6, value=f'=COUNTIFS({ex_rng},$A{r})')
             ws.cell(row=r, column=7, value=f'=COUNTIFS({rng("AGENT")},$A{r},{rng("DUP_FLAG")},"<>")')
 
         t = len(agents) + 2
@@ -122,7 +138,7 @@ def export_multi(df, summary_by="AGENT"):
         for r in range(2, t + 1):
             for col in "CDE":
                 ws[f"{col}{r}"].number_format = "#,##0.00"
-        for col, w in zip("ABCDEFG", [14, 10, 14, 16, 10, 20, 18]):
+        for col, w in zip("ABCDEFG", [14, 10, 14, 16, 10, 26, 18]):
             ws.column_dimensions[col].width = w
         ws.freeze_panes = "A2"
 

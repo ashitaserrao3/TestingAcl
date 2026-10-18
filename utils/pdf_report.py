@@ -6,7 +6,7 @@ turns those blocks into the same tables / chart on paper:
     ("kpis",   [(label, value), ...])
     ("table",  title, headers, rows, total_row)   rows: (kind, cells), kind = "sub" | "detail" | ""
     ("note",   text)
-    ("chart",  title, agents, {measure: [share %, ...]}, {measure: [label, ...]})
+    ("chart",  title, agents, {measure: [share %, ...]}, {measure: [label, ...]}[, {measure: colour}])
     ("lanes",  [(title, headers, rows, tone), ...])   lane tables, two per row
 """
 
@@ -219,8 +219,9 @@ def build_pdf(report, title, subtitle_lines, colours):
         elif kind == "note":
             story += [Spacer(1, 2), Paragraph(_plain(block[1]), NOTE)]
         elif kind == "chart":
-            _, c_title, agents, shares, labels = block
-            story.append(KeepTogether([_section(c_title), _chart(agents, shares, labels, colours, width)]))
+            _, c_title, agents, shares, labels = block[:5]
+            c_colours = block[5] if len(block) > 5 else colours  # a chart can bring its own colours
+            story.append(KeepTogether([_section(c_title), _chart(agents, shares, labels, c_colours, width)]))
         elif kind == "lanes":
             half = (width - 8 * mm) / 2
             cells = []

@@ -45,6 +45,21 @@ TAIL_COLS = [
 ]
 
 STANDARD_COLS = LEAD_COLS + TAIL_COLS
+
+# "VOID" (or "Cancelled") anywhere in a row = the AWB was cancelled
+CANCELLED = "Cancelled (VOID)"
+_CANCEL_WORD = r"(?i)\b(?:VOID(?:ED)?|CANCELL?(?:ED)?)\b"
+
+
+def is_cancelled(df):
+    """True for rows where any text cell says VOID / CANCELLED (file name / invoice no. not counted)."""
+    hit = pd.Series(False, index=df.index)
+    for col in df.columns:
+        if col in ("SOURCE_FILE", "INVOICE_NO"):
+            continue
+        if df[col].dtype == object or str(df[col].dtype) in ("string", "str"):
+            hit |= df[col].astype("string").str.contains(_CANCEL_WORD, regex=True, na=False)
+    return hit
 NUMERIC_COLS = ["PKGS", "CHR_WT", "RATE", "BASIC_FRT", "TOTAL_FRT", "ADDON_CHR"]
 
 
@@ -61,6 +76,7 @@ def standardize(df, agent, extra_cols=None):
     """
     extra_cols = [c for c in (extra_cols or []) if c not in STANDARD_COLS]
     df = df.copy()
+    cancelled = is_cancelled(df)
 
     for col in STANDARD_COLS + extra_cols:
         if col not in df.columns:
@@ -133,6 +149,8 @@ def standardize(df, agent, extra_cols=None):
         .apply(lambda r: "; ".join(x for x in r if x), axis=1)
         .replace("", pd.NA)
     )
+    # cancelled rows: that is the only thing worth saying about them
+    df.loc[cancelled, "DATA_ISSUE"] = CANCELLED
 
     df = df[LEAD_COLS + extra_cols + TAIL_COLS]
     return flag_duplicates(df)
@@ -151,11 +169,22 @@ def flag_duplicates(df):
     df = df.drop_duplicates(subset=key).reset_index(drop=True)
     df.attrs["exact_dups_removed"] = before - len(df)
 
-    counts = df.groupby("AWB_NO", dropna=True)["AWB_NO"].transform("size")
+    # a cancelled (VOID) line does not make the re-billed AWB a repeat
+    live = df[df["DATA_ISSUE"].astype("string").fillna("") != CANCELLED]
+    counts = live.groupby("AWB_NO", dropna=True)["AWB_NO"].transform("size").reindex(df.index)
     df["DUP_FLAG"] = pd.Series(pd.NA, index=df.index, dtype="string")
     rep = counts > 1
     df.loc[rep, "DUP_FLAG"] = "AWB repeated x" + counts[rep].astype(int).astype(str)
     return df
+
+
+def split_issues(df):
+    """
+    (clean rows, rows with a DATA_ISSUE). Rows with an issue – including cancelled
+    (VOID) AWBs – are left out of totals and charts.
+    """
+    bad = df["DATA_ISSUE"].notna()
+    return df[~bad], df[bad]
 
 
 def combine(frames):

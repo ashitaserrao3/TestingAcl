@@ -71,5 +71,5 @@ def run():
 
     show_results(
         df, cached["logs"], KEY, "MultiAgent_Combined.xlsx",
-        lambda d: export_multi(d).getvalue(), cached, n_files=n_files,
+        lambda d, bad: export_multi(d, excluded=bad).getvalue(), cached, n_files=n_files,
     )

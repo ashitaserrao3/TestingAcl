@@ -17,7 +17,7 @@ from utils.ui import chips, page_title
 from utils.common import get_airline
 from utils.excel_utils import formula_cells_without_values
 from utils.exporter import export_excel
-from utils.schema import standardize
+from utils.schema import CANCELLED, is_cancelled, split_issues, standardize
 
 
 def files_signature(files):
@@ -33,6 +33,10 @@ BLANK_CHECK = {"AWB_DATE": "date", "DEST": "destination", "CHR_WT": "weight", "T
 
 def report_blanks(df, f, log, skip_sheet=None):
     """Tell the user exactly which cells came through empty, and why if we can tell."""
+    void = is_cancelled(df)
+    if void.any():
+        log("info", f"{f.name}: {int(void.sum())} cancelled (VOID) AWB(s) left out")
+    df = df[~void]
     gaps = []
     for col, label in BLANK_CHECK.items():
         if col in df.columns:
@@ -75,7 +79,7 @@ def process_agent_files(agent_module, files, log):
 
 def report_airlines(df, log):
     """Per file: how many airlines came from the AWB prefix, and which flight cells were not understood."""
-    air = df[df["TRNSPT_MODE"] != "ROAD"]
+    air = df[(df["TRNSPT_MODE"] != "ROAD") & (df["DATA_ISSUE"].fillna("") != CANCELLED)]
     for fname, part in air.groupby("SOURCE_FILE"):
         from_flight = part["FLIGHT_NO"].map(get_airline)
         via_awb = int((from_flight.isna() | (from_flight == "Other")).sum()
@@ -98,10 +102,9 @@ def show_problems(logs):
             st.warning(m, icon="⚠️")
 
 
-def quality_chips(df, logs, n_files=None):
+def quality_chips(df, logs, n_files=None, n_excluded=0, n_cancelled=0):
     removed = df.attrs.get("exact_dups_removed", 0)
     dup = int(df["DUP_FLAG"].notna().sum())
-    issue = int(df["DATA_ISSUE"].notna().sum())
     errors = sum(1 for lvl, _ in logs if lvl == "error")
     items = [(f"✓ {len(df):,} rows", "ok")]
     if n_files:
@@ -112,8 +115,10 @@ def quality_chips(df, logs, n_files=None):
         items.append((f"{removed} exact repeats removed", ""))
     if dup:
         items.append((f"{dup} repeated AWBs", "warn"))
-    if issue:
-        items.append((f"{issue} data issues", "warn"))
+    if n_cancelled:
+        items.append((f"{n_cancelled} cancelled (VOID) left out", ""))
+    if n_excluded:
+        items.append((f"{n_excluded} rows left out (data issues)", "warn"))
     if errors:
         items.append((f"{errors} file errors", "bad"))
     chips(items)
@@ -150,25 +155,33 @@ def month_filter(df, key):
 
 
 def show_results(df_all, logs, key, file_name, make_excel, cache, n_files=None):
-    """Month filter + status chips + download, then tabs: Dashboard / Data / Issues / Log."""
+    """
+    Month filter + status chips + download, then tabs: Dashboard / Data / Issues / Log.
+    Rows with a DATA_ISSUE are left out of the dashboard, data and totals; they are
+    listed in the Issues tab and on their own sheet in the Excel.
+    make_excel(clean_rows, excluded_rows) -> bytes
+    """
     f_col, _ = st.columns([1, 2])
     with f_col:
-        df, month = month_filter(df_all, key)
+        shown, month = month_filter(df_all, key)
     if month:
-        hidden = len(df_all) - len(df)
+        hidden = len(df_all) - len(shown)
         st.caption(f"Showing **{month}** only – {hidden:,} AWB(s) from other months hidden.")
+    df, excluded = split_issues(shown)
+    is_void = excluded["DATA_ISSUE"] == CANCELLED
+    voided, issues = excluded[is_void], excluded[~is_void]
 
     # Excel follows the month filter; each version is built once and kept
     tag = month or "all"
     xl = cache.setdefault("xlsx_by_month", {})
     if tag not in xl:
         with st.spinner("Preparing Excel…"):
-            xl[tag] = make_excel(df)
+            xl[tag] = make_excel(df, excluded)
     out_name = file_name if not month else file_name.replace(".xlsx", f"_{month.replace(' ', '')}.xlsx")
 
     top_l, top_r = st.columns([3, 1], vertical_alignment="center")
     with top_l:
-        quality_chips(df, logs, n_files)
+        quality_chips(df, logs, n_files, n_excluded=len(issues), n_cancelled=len(voided))
     with top_r:
         st.download_button(
             "⬇  Download Excel",
@@ -182,15 +195,26 @@ def show_results(df_all, logs, key, file_name, make_excel, cache, n_files=None):
             args=("DOWNLOAD", out_name),
         )
     show_problems(logs)
+    if len(excluded):
+        parts = []
+        if len(voided):
+            parts.append(f"{len(voided):,} cancelled (VOID) AWB(s)")
+        if len(issues):
+            parts.append(f"{len(issues):,} row(s) with data issues")
+        st.info(" and ".join(parts) + " were left out of the dashboard, data and totals – see the **Issues** tab "
+                "(also on the *Excluded_Issues* sheet in the Excel).", icon="ℹ️")
 
-    flagged = df[df["DUP_FLAG"].notna() | df["DATA_ISSUE"].notna()]
+    dups = df[df["DUP_FLAG"].notna()]
     infos = [m for lvl, m in logs if lvl == "info"]
     t_dash, t_data, t_issue, t_log = st.tabs(
-        ["📊  Dashboard", "📋  Data", f"⚠️  Issues ({len(flagged)})", "🧾  Processing log"]
+        ["📊  Dashboard", "📋  Data", f"⚠️  Issues ({len(excluded) + len(dups)})", "🧾  Processing log"]
     )
 
     with t_dash:
-        show_dashboard(df, key=key, pdf_name=out_name.replace(".xlsx", "_Dashboard.pdf"), month=month)
+        if df.empty:
+            st.warning("Every row has a data issue, so there is nothing to chart – see the Issues tab.")
+        else:
+            show_dashboard(df, key=key, pdf_name=out_name.replace(".xlsx", "_Dashboard.pdf"), month=month)
 
     with t_data:
         q = st.text_input("Search", placeholder="AWB no, invoice, lane…", key=f"{key}_q",
@@ -205,12 +229,21 @@ def show_results(df_all, logs, key, file_name, make_excel, cache, n_files=None):
         st.dataframe(view, width="stretch", height=520, column_config=DATE_CFG)
 
     with t_issue:
-        if flagged.empty:
+        if excluded.empty and dups.empty:
             st.success("No repeated AWBs or data issues found.", icon="✅")
-        else:
-            st.caption("DUP_FLAG = same AWB on more than one row (all rows kept). "
-                       "DATA_ISSUE = something missing or not matching in the bill.")
-            st.dataframe(flagged[ISSUE_COLS], width="stretch", hide_index=True, column_config=DATE_CFG)
+        if len(issues):
+            st.markdown(f"**Left out – data issues ({len(issues):,})**")
+            st.caption("Something missing or not matching in the bill. These rows are not in the dashboard, "
+                       "data or totals. Fix the bill and upload it again to include them.")
+            st.dataframe(issues[ISSUE_COLS], width="stretch", hide_index=True, column_config=DATE_CFG)
+        if len(voided):
+            st.markdown(f"**Cancelled – VOID ({len(voided):,})**")
+            st.caption("The bill marks these AWBs as VOID (cancelled), so they are not counted anywhere.")
+            st.dataframe(voided[ISSUE_COLS], width="stretch", hide_index=True, column_config=DATE_CFG)
+        if len(dups):
+            st.markdown(f"**Repeated AWBs ({len(dups):,})**")
+            st.caption("Same AWB on more than one row. These rows are kept in the totals.")
+            st.dataframe(dups[ISSUE_COLS], width="stretch", hide_index=True, column_config=DATE_CFG)
 
     with t_log:
         if not infos:
@@ -257,5 +290,5 @@ def run_agent_page(agent_module):
     sheet = agent_module.KEY.upper()
     show_results(
         df, cached["logs"], key, agent_module.OUTPUT_FILE,
-        lambda d: export_excel(d, sheet_name=sheet).getvalue(), cached, n_files=len(files),
+        lambda d, bad: export_excel(d, sheet_name=sheet, excluded=bad).getvalue(), cached, n_files=len(files),
     )

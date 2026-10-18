@@ -1,4 +1,10 @@
-"""EDS bills (Excel). File name = ORIGIN-xxx-xxx... (first 3 parts = invoice no)."""
+"""
+EDS bills (Excel). Invoice no. and origin come from the sheet's title row
+("ANNEXURE TO INVOICE No. BOM/455/26-27" -> invoice BOM/455/26-27, origin BOM).
+Fallback when that row is missing: file name ORIGIN-xxx-xxx... (first 3 parts = invoice no).
+"""
+
+import re
 
 import pandas as pd
 
@@ -8,7 +14,7 @@ from utils.excel_utils import read_raw_any
 AGENT = "EDS"
 KEY = "eds"
 LABEL = "EDS"
-DESCRIPTION = "EDS bills (.xlsx) · file name gives origin and invoice no."
+DESCRIPTION = "EDS bills (.xlsx) · invoice no. and origin read from the bill's title row"
 FILE_TYPES = ["xlsx", "xls"]
 OUTPUT_FILE = "EDS_Combined.xlsx"
 
@@ -33,6 +39,27 @@ SOURCE = {
     "IGST": ["IGST 18%", "IGST"],
     "AMOUNT": ["AMOUNT"],
 }
+
+
+_INVOICE = re.compile(r"INVOICE\s*NO\.?\s*[:\-]*\s*([A-Z]{3}\s*[/\-][^\s,]+)", re.I)
+
+
+def invoice_from_sheet(raw, header_row):
+    """'ANNEXURE TO INVOICE No. BOM/455/26-27 Date:-...' above the header -> 'BOM/455/26-27'."""
+    for r in range(header_row):
+        for v in raw.iloc[r].dropna():
+            m = _INVOICE.search(str(v))
+            if m:
+                return re.sub(r"\s+", "", m.group(1)).upper()
+    return None
+
+
+def invoice_from_name(name):
+    """'BOM-455-SEP2ND-ALLCARGO.xlsx' -> ('BOM-455-SEP2ND', 'BOM'); (None, None) if the name isn't like that."""
+    parts = [p.strip() for p in strip_ext(name).split("-")]
+    if len(parts) >= 2 and re.fullmatch(r"[A-Za-z]{3}", parts[0]):
+        return "-".join(parts[:3]), parts[0].upper()
+    return None, None
 
 
 def parse(data, name, log):
@@ -69,9 +96,19 @@ def parse(data, name, log):
     out["TOTAL_FRT"] = out["BASIC_FRT"] + out["ADDON_CHR"]
     out["AWB_DATE"] = to_date(out["AWB_DATE"], dayfirst=True)
 
-    parts = strip_ext(name).split("-")
-    out["INVOICE_NO"] = "-".join(parts[:3])   # fixed: was blank for every row
-    out["ORIGIN"] = parts[0].strip()
+    invoice = invoice_from_sheet(raw, header_row)
+    if invoice:
+        origin = invoice[:3]
+    else:
+        invoice, origin = invoice_from_name(name)
+        if invoice:
+            log("info", f"{name}: invoice no. not found in the sheet – taken from the file name")
+        else:
+            invoice = strip_ext(name)
+            log("warning", f"{name}: invoice no. / origin not found in the sheet or the file name "
+                           "– origin left blank (see DATA_ISSUE)")
+    out["INVOICE_NO"] = invoice
+    out["ORIGIN"] = origin
     out["LODGE_MODE"] = out["AWB_NO"].str.contains("-", regex=False).map({True: "Direct", False: "Console"})
     out["TRNSPT_MODE"] = "AIR"
     return out

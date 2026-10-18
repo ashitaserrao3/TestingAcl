@@ -57,6 +57,8 @@ def apply_filters(df, key):
 
 # one colour per measure, same order everywhere (blue, orange, aqua)
 SHARE_COLORS = {"Lodgement %": "#2a78d6", "Volume %": "#eb6834", "Cost %": "#1baf7a"}
+# airline chart: same measures, its own colours (purple, gold, pink) so it doesn't read as the agent chart
+AIRLINE_COLORS = {"Lodgement %": "#7b4fd6", "Volume %": "#e0a21b", "Cost %": "#d6457a"}
 
 
 def _short(x):
@@ -93,20 +95,27 @@ def view_toggle(key, name, data, view_label, hide_label):
         st.session_state[f"{state_key}_sig"] = signature
         st.session_state[state_key] = False
     showing = st.session_state.get(state_key, False)
-    st.button(hide_label if showing else view_label, key=f"{state_key}_btn", on_click=_flip, args=(state_key,))
+    _, mid, _ = st.columns([2, 1, 2])  # button sits in the middle under the table
+    mid.button(hide_label if showing else view_label, key=f"{state_key}_btn", on_click=_flip, args=(state_key,),
+               width="stretch")
     return showing
 
 
 CHART_TITLE = "Lodgement · Volume · Cost share by agent"
+AIRLINE_CHART_TITLE = "Lodgement · Volume · Cost share by airline"
 
 
-def share_data(in_table, agents):
-    """One row per agent × measure: share %, short label for the bar, exact figure for the tooltip."""
+def share_data(in_table, agents, by=None):
+    """
+    One row per group × measure: share %, short label for the bar, exact figure for the tooltip.
+    by: group of each row (default AGENT); agents: the groups, in display order.
+    """
+    by = in_table["AGENT"] if by is None else by
     grand = {"Lodgement %": len(in_table), "Volume %": in_table["CHR_WT"].sum(),
              "Cost %": in_table["TOTAL_FRT"].sum()}
     rows = []
     for a in agents:
-        part = in_table[in_table["AGENT"] == a]
+        part = in_table[by == a]
         actual = {"Lodgement %": len(part), "Volume %": part["CHR_WT"].sum(), "Cost %": part["TOTAL_FRT"].sum()}
         exact = {"Lodgement %": _n(actual["Lodgement %"]), "Volume %": f"{_n(actual['Volume %'])} kg",
                  "Cost %": f"₹{_n(actual['Cost %'])}"}
@@ -119,14 +128,15 @@ def share_data(in_table, agents):
     return pd.DataFrame(rows)
 
 
-def agent_chart(in_table, agents, key):
-    """'View' button under the agent table -> share-% bars per agent."""
-    if not view_toggle(key, "agent_chart", in_table, "📊 View", "Hide chart"):
+def agent_chart(in_table, agents, key, by=None, name="agent_chart", title=CHART_TITLE, colors=SHARE_COLORS,
+                label="Agent"):
+    """'View' button under the agent (or airline) table -> share-% bars per group."""
+    if not view_toggle(key, name, in_table, "📊 View", "Hide chart"):
         return
     if in_table.empty:
         st.caption("No shipments for these filters, so there is nothing to chart.")
         return
-    shares = share_data(in_table, agents)
+    shares = share_data(in_table, agents, by)
 
     axis_x = alt.Axis(labelAngle=0, title=None, labelColor="#33415C", domain=False, ticks=False)
     axis_y = dict(grid=True, gridColor="#EEF1F6", domain=False, ticks=False, labelColor="#5B6B82",
@@ -137,12 +147,12 @@ def agent_chart(in_table, agents, key):
         xOffset=alt.XOffset("Measure:N", sort=list(SHARE_COLORS)),
         y=alt.Y("Share:Q", title="Share of total (%)", axis=alt.Axis(**axis_y),
                 scale=alt.Scale(domainMax=shares["Share"].max() * 1.18 if len(shares) else 100)),
-        tooltip=["Agent", "Measure", alt.Tooltip("Share:Q", title="Share %", format=".1f"),
+        tooltip=[alt.Tooltip("Agent:N", title=label), "Measure", alt.Tooltip("Share:Q", title="Share %", format=".1f"),
                  alt.Tooltip("Exact:N", title="Actual")],
     )
     bars = base.mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4, stroke="#FFFFFF", strokeWidth=2).encode(
-        color=alt.Color("Measure:N", sort=list(SHARE_COLORS),
-                        scale=alt.Scale(domain=list(SHARE_COLORS), range=list(SHARE_COLORS.values())),
+        color=alt.Color("Measure:N", sort=list(colors),
+                        scale=alt.Scale(domain=list(colors), range=list(colors.values())),
                         legend=alt.Legend(orient="top", title=None, labelColor="#33415C")),
     )
     # % on top (bold), actual number just under it
@@ -150,7 +160,7 @@ def agent_chart(in_table, agents, key):
     actual = base.mark_text(dy=-7, fontSize=10, color="#5B6B82").encode(text="Actual:N")
     share_chart = (bars + pct + actual).properties(height=360)
 
-    section(CHART_TITLE)
+    section(title)
     st.altair_chart(share_chart, width="stretch")
 
 
@@ -241,6 +251,20 @@ def show_dashboard(df, key="dash", pdf_name="Dashboard.pdf", month=None):
             report.append(("chart", CHART_TITLE, list(by_frt),
                            {m: sd[sd["Measure"] == m]["Share"].tolist() for m in SHARE_COLORS},
                            {m: sd[sd["Measure"] == m]["Actual"].tolist() for m in SHARE_COLORS}))
+
+    # ---------------- AIRLINE × MODE (only when Transport mode = AIR) ----------------
+    if air_split and not in_table.empty:
+        airline = in_table["AIRLINE"].astype("string").fillna("No airline")
+        section("Airline-wise" + split_title)
+        by_frt = in_table.groupby(airline)["TOTAL_FRT"].sum().sort_values(ascending=False).index
+        pivot("Airline-wise" + split_title, "Airline", [(a, in_table[airline == a]) for a in by_frt])
+        agent_chart(in_table, list(by_frt), key, by=airline, name="airline_chart",
+                    title=AIRLINE_CHART_TITLE, colors=AIRLINE_COLORS, label="Airline")
+        sd = share_data(in_table, list(by_frt), airline)
+        report.append(("chart", AIRLINE_CHART_TITLE, list(by_frt),
+                       {m: sd[sd["Measure"] == m]["Share"].tolist() for m in AIRLINE_COLORS},
+                       {m: sd[sd["Measure"] == m]["Actual"].tolist() for m in AIRLINE_COLORS},
+                       AIRLINE_COLORS))
 
     # ---------------- LANES: costliest / cheapest by CPKG ----------------
     lanes = (
