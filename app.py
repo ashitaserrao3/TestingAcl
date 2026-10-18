@@ -66,17 +66,22 @@ if not st.session_state.get("authentication_status"):
 # against the hash in Secrets.
 ADMIN_USER = "ashita"
 
+UPLOADS = ["Schedule", "Tariff rates"]
+
+uploads = {}
 if st.session_state.get("username") == ADMIN_USER:
     with st.sidebar:
         st.header("Upload")
-        uploads = st.file_uploader("Choose files", accept_multiple_files=True)
-else:
-    uploads = []
+        for label in UPLOADS:
+            uploads[label] = st.file_uploader(f"Upload {label.lower()}", accept_multiple_files=True, key=label)
 
 st.title("Yes, you did it! 🎉")
 st.write(f"You are signed in as **{st.session_state.get('name')}**.")
-for f in uploads or []:
-    st.write(f"📄 **{f.name}** – {f.size / 1024:.1f} KB")
+for label, files in uploads.items():
+    if files:
+        st.subheader(label)
+        for f in files:
+            st.write(f"📄 **{f.name}** – {f.size / 1024:.1f} KB")
 authenticator.logout("Sign out")
 if not st.session_state.get("authentication_status"):
     st.rerun()  # just signed out -> back to the login screen
