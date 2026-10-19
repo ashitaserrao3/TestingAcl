@@ -57,6 +57,10 @@ authenticator = stauth.Authenticate(
 if not st.session_state.get("authentication_status"):
     _, mid, _ = st.columns([1, 1.1, 1])
     with mid:
+        st.html("""<div style="text-align:center;margin:8vh 0 18px;font-family:Inter,system-ui,sans-serif">
+<div style="font-size:40px">✈</div>
+<div style="font-size:24px;font-weight:700;color:#1F4E78;letter-spacing:.06em">FLIGHT SCHEDULE</div>
+<div style="color:#64748B;font-size:14px;margin-top:4px">Sign in to see today's air cargo rates</div></div>""")
         try:
             authenticator.login(
                 fields={"Form name": "Sign in", "Username": "Username",
@@ -77,60 +81,99 @@ if not st.session_state.get("authentication_status"):
 # (see README). To change the data, replace those files in GitHub.
 # =====================================================
 
-# Colours taken from the workbook's own formatting
-NAVY, BLUE, GREEN_DARK = "#1F4E78", "#2E74B5", "#375623"
-BAND, INPUT_YELLOW, STRIPE, GREY_TEXT, MSG_BROWN = "#DCE6F1", "#FFF2CC", "#F2F2F2", "#595959", "#833C0C"
-STATUS_FILL = {"ACTIVE": "#C6E0B4", "NO SERVICE": "#F8CBAD", "SAME CITY": "#FFF2CC"}
+# Colours: the workbook's navy / green, softened for the web
+NAVY, NAVY_DARK, BLUE, GREEN_DARK = "#1F4E78", "#16324F", "#2E74B5", "#2F5130"
+INK, MUTED, LINE, STRIPE, HOVER = "#0F1B33", "#64748B", "#E5E9F0", "#F8FAFC", "#EEF4FB"
+STATUS_FILL = {"ACTIVE": ("#DCFCE7", "#166534"), "NO SERVICE": ("#FEE2E2", "#991B1B"),
+               "SAME CITY": ("#FEF3C7", "#92400E")}
 CHECK_AMBER = "#FFE699"
 LOWEST_RED = "#FFC7CE"  # Excel's "light red fill"
+AIRLINE_DOT = {"INDIGO": "#1D4ED8", "AIRINDIA": "#B91C1C", "AKASA": "#F97316", "SPICEJET": "#EAB308",
+               "STARAIR": "#0EA5E9", "ALLIANCEAIR": "#64748B"}
 
 SHEET_CSS = f"""
 <style>
-.xl {{ font-family: Aptos Narrow, "Arial Narrow", Calibri, Arial, sans-serif; color: #000; }}
-.xl-title {{ background: {NAVY}; color: #fff; font-weight: 700; font-size: 24px; text-align: center;
-             padding: 10px 0; letter-spacing: .08em; }}
-.xl-rates {{ color: {GREY_TEXT}; font-size: 12px; text-align: right; margin: 2px 0 6px; }}
-.xl-band {{ display: grid; grid-template-columns: 4fr 2fr 2fr 3fr; background: {BAND}; }}
-.xl-band > div {{ padding: 4px 10px 6px; min-width: 0; }}
-.xl-band .k {{ font-size: 12px; font-weight: 700; }}
-.xl-band .v {{ color: {NAVY}; font-weight: 700; font-size: 21px; line-height: 1.25; }}
-.xl-band .route {{ font-size: 17px; overflow-wrap: anywhere; }}
-.xl-band .st {{ color: #000; font-size: 18px; }}
-.xl-msg {{ color: {MSG_BROWN}; font-weight: 700; text-align: center; padding: 10px 0 4px; font-size: 15px; }}
-.xl-wrap {{ overflow-x: auto; margin-top: 10px; }}
-.xl-table {{ border-collapse: collapse; width: 100%; font-size: 14px; }}
-.xl-table th {{ background: {BLUE}; color: #fff; font-weight: 700; text-align: center; padding: 5px 8px;
-                border: 1px solid #fff; white-space: nowrap; }}
+.xl {{ font-family: Inter, system-ui, -apple-system, "Segoe UI", Arial, sans-serif; color: {INK}; }}
+.xl-title {{ background: linear-gradient(120deg, {NAVY_DARK}, {NAVY} 60%, {BLUE}); color: #fff; border-radius: 14px;
+             padding: 16px 22px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+             box-shadow: 0 6px 18px rgba(22, 50, 79, .18); }}
+.xl-title .t {{ font-weight: 700; font-size: 22px; letter-spacing: .12em; }}
+.xl-title .s {{ font-size: 13px; opacity: .8; letter-spacing: .02em; }}
+.xl-chips {{ display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; }}
+.xl-chip {{ background: #fff; border: 1px solid {LINE}; border-radius: 999px; padding: 3px 10px; font-size: 12px;
+            color: {MUTED}; white-space: nowrap; }}
+.xl-chip b {{ color: {INK}; font-weight: 600; }}
+.xl-band {{ display: grid; grid-template-columns: 2.2fr 1fr 1fr 1.2fr; gap: 12px; }}
+.xl-band > div {{ background: #fff; border: 1px solid {LINE}; border-radius: 12px; padding: 12px 16px; min-width: 0;
+                  box-shadow: 0 1px 2px rgba(15, 27, 51, .04); }}
+.xl-band .k {{ font-size: 11px; font-weight: 600; letter-spacing: .08em; color: {MUTED}; text-transform: uppercase; }}
+.xl-band .v {{ color: {NAVY}; font-weight: 700; font-size: 26px; line-height: 1.3; font-variant-numeric: tabular-nums; }}
+.xl-band .route {{ font-size: 18px; overflow-wrap: anywhere; }}
+.xl-band .route span {{ color: {MUTED}; font-weight: 500; }}
+.xl-band .st {{ display: inline-block; font-size: 14px; letter-spacing: .06em; border-radius: 999px; padding: 4px 12px;
+                margin-top: 4px; }}
+.xl-msg {{ background: #FFF7ED; border: 1px solid #FED7AA; color: #9A3412; border-radius: 10px; font-weight: 600;
+           text-align: center; padding: 10px 14px; margin-top: 12px; font-size: 14px; }}
+.xl-special {{ background: #F5F0FC; border: 1px solid #E4D7F5; color: #5B2C83; border-radius: 10px; font-weight: 600;
+               text-align: center; padding: 8px 14px; margin-top: 12px; font-size: 13px; }}
+.xl-wrap {{ overflow-x: auto; margin-top: 14px; background: #fff; border: 1px solid {LINE}; border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(15, 27, 51, .06); }}
+.xl-table {{ border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14px; }}
+.xl-table th {{ background: {NAVY}; color: #fff; font-weight: 600; font-size: 12px; letter-spacing: .06em;
+                text-align: center; padding: 10px 12px; white-space: nowrap; border-bottom: 1px solid rgba(255,255,255,.15); }}
 .xl-table th.cpkg {{ background: {GREEN_DARK}; }}
-.xl-table td {{ padding: 5px 8px; border-bottom: 1px solid #E7E7E7; white-space: nowrap; }}
+.xl-table th.l {{ text-align: left; }}
+.xl-table td {{ padding: 10px 12px; border-bottom: 1px solid {LINE}; white-space: nowrap; }}
+.xl-table tbody tr:last-child td {{ border-bottom: none; }}
 .xl-table tbody tr:nth-child(even) td {{ background: {STRIPE}; }}
+.xl-table tbody tr:hover td {{ background: {HOVER}; }}
 .xl-table td.c {{ text-align: center; }}
-.xl-table td.cpkg {{ text-align: center; color: {GREEN_DARK}; font-weight: 700; font-size: 15px; }}
-.xl-table td.cpkg.lowest {{ background: {LOWEST_RED} !important; }}
+.xl-table td.air {{ font-weight: 600; }}
+.xl-table .dot {{ display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; }}
+.xl-table td.fno {{ font-variant-numeric: tabular-nums; color: {NAVY}; font-weight: 500; }}
+.xl-table td.cpkg {{ text-align: center; color: {GREEN_DARK}; font-weight: 700; font-size: 15px;
+                     font-variant-numeric: tabular-nums; }}
+.xl-table td.cpkg.lowest {{ background: {LOWEST_RED} !important; color: #9B1C31; }}
 .xl-table td.check {{ background: {CHECK_AMBER} !important; }}
-.xl-table td.muted {{ color: #808080; }}
+.xl-table td.muted {{ color: #94A3B8; }}
 .xl-table sup {{ color: #9C5700; font-size: 10px; font-weight: 400; }}
-.xl-note {{ color: {GREY_TEXT}; font-size: 11px; margin-top: 10px; }}
-.xl-special {{ color: #5B2C83; font-weight: 700; text-align: center; padding: 8px 0 0; font-size: 14px; }}
-.sp {{ background: #E4D7F5; color: #5B2C83; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px;
-       letter-spacing: .04em; }}
+.xl-legend {{ display: flex; flex-wrap: wrap; gap: 14px; align-items: center; color: {MUTED}; font-size: 12px;
+              margin-top: 12px; }}
+.xl-legend i {{ display: inline-block; width: 14px; height: 14px; border-radius: 4px; vertical-align: -2px;
+                margin-right: 6px; }}
+.xl-note {{ color: {MUTED}; font-size: 12px; margin-top: 8px; }}
+.xl-note summary {{ cursor: pointer; font-weight: 600; color: {NAVY}; }}
+.xl-note p {{ margin: 6px 0 0; line-height: 1.55; }}
+@media (max-width: 700px) {{
+  .xl-band {{ grid-template-columns: 1fr 1fr; gap: 8px; }}
+  .xl-band > div:first-child {{ grid-column: 1 / -1; }}
+  .xl-band .v {{ font-size: 22px; }}
+  .xl-title {{ padding: 12px 16px; }}
+  .xl-title .t {{ font-size: 18px; }}
+  .xl-title .s {{ display: none; }}
+}}
+.sp {{ background: #E4D7F5; color: #5B2C83; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 999px;
+       letter-spacing: .04em; margin-left: 4px; }}
 </style>
 """
 
 WIDGET_CSS = f"""
 <style>
-/* Origin / Destination drop-downs styled like the workbook's yellow input cells */
-.st-key-origin [role="group"], .st-key-dest [role="group"],
-.st-key-origin div[data-baseweb="select"] > div, .st-key-dest div[data-baseweb="select"] > div {{
-  background: {INPUT_YELLOW}; border-radius: 0;
+.block-container {{ padding-top: 1.6rem; max-width: 1280px; }}
+/* From / To pickers */
+[class*="st-key-origin"] div[data-baseweb="select"] > div, [class*="st-key-dest"] div[data-baseweb="select"] > div {{
+  background: #fff; border-radius: 10px; min-height: 44px;
 }}
-.st-key-origin input, .st-key-dest input {{ color: {NAVY}; font-weight: 700; font-size: 16px; }}
-.xl-label {{ font-weight: 700; text-align: right; font-size: 15px; }}
-.xl-name {{ color: {GREY_TEXT}; font-size: 15px; }}
+[class*="st-key-origin"] input, [class*="st-key-dest"] input {{ color: {NAVY}; font-weight: 700; font-size: 17px; }}
+[class*="st-key-origin"] label p, [class*="st-key-dest"] label p {{ font-size: 12px; font-weight: 600; letter-spacing: .08em;
+  color: {MUTED}; text-transform: uppercase; }}
+.st-key-swap button {{ border-radius: 999px; min-height: 44px; font-size: 18px; }}
+.xl-name {{ color: {MUTED}; font-size: 13px; margin-top: -6px; }}
 </style>
 """
 
-TITLE = '<div class="xl xl-title">✈&nbsp; FLIGHT &nbsp;SCHEDULE</div>'
+TITLE = ('<div class="xl xl-title"><div class="t">✈&nbsp; FLIGHT SCHEDULE</div>'
+         '<div class="s">Air cargo CPKG by route · ₹ per kg</div></div>')
 
 
 def dmy(v):
@@ -378,25 +421,39 @@ names = {s["Code"]: s["Name"] or "" for s in stations}
 hub_codes = [s["Code"] for s in hubs] or list(names)
 all_codes = queries.destinations(conn, hub_codes) or list(names)
 
+# The route lives in ss["o"] / ss["d"]; the pickers are rebuilt (new key) when it's swapped.
 if not ss.get("_from_link"):  # a shared link like ?from=DEL&to=BOM opens that route once per session
     ss["_from_link"] = True
     if st.query_params.get("from", "").upper() in hub_codes:
-        ss["origin"] = st.query_params["from"].upper()
+        ss["o"] = st.query_params["from"].upper()
     if st.query_params.get("to", "").upper() in all_codes:
-        ss["dest"] = st.query_params["to"].upper()
-if ss.get("origin") not in hub_codes:
-    ss["origin"] = "DEL" if "DEL" in hub_codes else hub_codes[0]
-if ss.get("dest") not in all_codes:
-    ss["dest"] = "CJB" if "CJB" in all_codes else all_codes[0]
+        ss["d"] = st.query_params["to"].upper()
+if ss.get("o") not in hub_codes:
+    ss["o"] = "DEL" if "DEL" in hub_codes else hub_codes[0]
+if ss.get("d") not in all_codes:
+    ss["d"] = "CJB" if "CJB" in all_codes else all_codes[0]
+ss.setdefault("pickers", 0)
 
 st.html(SHEET_CSS + WIDGET_CSS + TITLE)
-c = st.columns([1.1, 1.1, 2, 1.4, 1.1, 2], vertical_alignment="center")
-c[0].html('<div class="xl xl-label">Origin:</div>')
-origin = c[1].selectbox("Origin", hub_codes, key="origin", label_visibility="collapsed")
-c[2].html(f'<div class="xl xl-name">{esc(names.get(origin))}</div>')
-c[3].html('<div class="xl xl-label">Destination:</div>')
-dest = c[4].selectbox("Destination", all_codes, key="dest", label_visibility="collapsed")
-c[5].html(f'<div class="xl xl-name">{esc(names.get(dest))}</div>')
+
+
+def swap():
+    if ss["d"] in hub_codes and ss["o"] in all_codes:
+        ss["o"], ss["d"] = ss["d"], ss["o"]
+        ss["pickers"] += 1
+
+
+def picked(which, key):
+    ss[which] = ss[key]
+
+
+n = ss["pickers"]
+c = st.columns([5, 1, 5], vertical_alignment="bottom")
+origin = c[0].selectbox("From", hub_codes, index=hub_codes.index(ss["o"]), key=f"origin_{n}", on_change=picked,
+                        args=("o", f"origin_{n}"), format_func=lambda x: f"{x} · {names.get(x) or ''}")
+c[1].button("⇄", key="swap", on_click=swap, width="stretch", help="Swap From and To", disabled=ss["d"] not in hub_codes)
+dest = c[2].selectbox("To", all_codes, index=all_codes.index(ss["d"]), key=f"dest_{n}", on_change=picked,
+                      args=("d", f"dest_{n}"), format_func=lambda x: f"{x} · {names.get(x) or ''}")
 st.query_params.from_dict({"from": origin, "to": dest})
 
 flights = queries.route_flights(conn, origin, dest, today) if origin != dest else []
@@ -406,12 +463,11 @@ status = "SAME CITY" if origin == dest else ("ACTIVE" if weekly else "NO SERVICE
 
 sched_note = sched_info["label"] + (f" (as on {dmy(sched_info['date'])})"
                                    if sched_info["date"] and sched_info["date"] != today else "")
-rate_effs = " · ".join(f"{c} {dmy(b['EffectiveDate'])}" for c in queries.CARRIER_TABLES
-                      if (b := eng.batch(c)))
-extra_effs = " · ".join(x for x in (f"Allcargo T&S {quote['wef']}" if quote else "",
-                                    f"Akasa special {special['wef']}" if special else "") if x)
-rates_line = (f"Rates eff.: {rate_effs or '–'}" + (f" | {extra_effs}" if extra_effs else "")
-              + f"  |  Schedule: {sched_note}  |  Linked {dmy(today)}")
+chips = [f"<b>{esc(c)}</b> {dmy(b['EffectiveDate'])}" for c in queries.CARRIER_TABLES if (b := eng.batch(c))]
+chips += [f"<b>Allcargo T&amp;S</b> {esc(quote['wef'])}"] if quote else []
+chips += [f"<b>Akasa special</b> {esc(special['wef'])}"] if special else []
+chips += [f"<b>Schedule</b> {esc(sched_note)}", f"<b>Today</b> {dmy(today)}"]
+rates_line = '<div class="xl-chips">' + "".join(f'<span class="xl-chip">{x}</span>' for x in chips) + "</div>"
 msg = {"SAME CITY": "⚠&nbsp; Please select two different cities as Origin and Destination.",
        "NO SERVICE": "✈&nbsp; No nonstop flights currently operate on this route. "
                      "Please try a different Origin / Destination combination."}.get(status, "")
@@ -493,7 +549,8 @@ for r, cells, sp in priced:
             tip = cell["tip"] + (f"; lowest {brk}+ kg CPKG on this route" if low else "")
             tds.append(f'<td class="cpkg{low}" title="{esc(tip)}">{num(cell["v"])}{mark}</td>')
     rows_html.append(
-        f"<tr><td>{esc(f['Airline'])}</td><td class='c'>{esc(f['FlightNo'])}</td>"
+        f"<tr><td class='air'><span class='dot' style='background:{AIRLINE_DOT.get(f['Airline'], MUTED)}'></span>"
+        f"{esc(f['Airline'])}</td><td class='c fno'>{esc(f['FlightNo'])}</td>"
         f"<td class='{pcls}' title='{esc(r.match_note)}'>{esc(product)}{badge}</td>"
         f"<td class='c'>{esc(f['DepTime'])}</td>{''.join(tds)}</tr>")
 
@@ -505,36 +562,45 @@ if route_specials and status == "ACTIVE":
                    + " · ".join(f"{category(cat)} flights {num(v['ssp'])} (Direct AWB +100, plus add-on)"
                                 for cat, v in route_specials))
 
-route = f"{esc(names.get(origin) or origin)} ({origin})&nbsp; → &nbsp;{esc(names.get(dest) or dest)} ({dest})"
+route = (f"{esc(names.get(origin) or origin)} <span>{origin}</span>&nbsp; → &nbsp;"
+         f"{esc(names.get(dest) or dest)} <span>{dest}</span>")
 table = ""
 if rows_html:
     table = f"""
 <div class="xl-wrap"><table class="xl-table">
   <thead>
-<tr><th rowspan="2">AIRLINE</th><th rowspan="2">FLT NO.</th><th rowspan="2">PRODUCT</th><th rowspan="2">ETD</th>
+<tr><th rowspan="2" class="l">AIRLINE</th><th rowspan="2">FLT NO.</th><th rowspan="2">PRODUCT</th><th rowspan="2">ETD</th>
     <th class="cpkg" colspan="2">CPKG &nbsp;(₹/kg)</th></tr>
 <tr><th class="cpkg">45+ kg</th><th class="cpkg">100+ kg</th></tr>
   </thead>
   <tbody>{''.join(rows_html)}</tbody>
 </table></div>"""
+fill, ink = STATUS_FILL[status]
 st.html(SHEET_CSS + f"""
 <div class="xl">
-  <div class="xl-rates">{esc(rates_line)}</div>
+  {rates_line}
   <div class="xl-band">
-<div><div class="k">ROUTE</div><div class="v route">{route}</div></div>
-<div><div class="k">WEEKLY FLIGHTS</div><div class="v">{weekly}</div></div>
-<div><div class="k">FLIGHT COUNT</div><div class="v">{len(results)}</div></div>
-<div style="background:{STATUS_FILL[status]}"><div class="k">STATUS</div><div class="v st">{status}</div></div>
+<div><div class="k">Route</div><div class="v route">{route}</div></div>
+<div><div class="k">Weekly flights</div><div class="v">{weekly}</div></div>
+<div><div class="k">Flight count</div><div class="v">{len(results)}</div></div>
+<div><div class="k">Status</div><div class="st" style="background:{fill};color:{ink}"><b>{status}</b></div></div>
   </div>
   {f'<div class="xl-msg">{msg}</div>' if msg else ''}
   {f'<div class="xl-special">{special_msg}</div>' if special_msg else ''}
   {table}
-  <div class="xl-note">CPKG (₹/kg) = the airline's own tariff rate (45+ / 100+) + Terminal &amp; Surcharges from the
-Allcargo sheet for that flight, matched by flight number (its own flight row, else its product's row, else the route's
-ALL row). <b>Akasa</b>: Akasa tariff rate (surcharges already included) + add-on from Akasa's OCDC sheet (origin outbound +
-destination inbound terminal charges, ₹/kg). <span class="sp">SPECIAL</span> = Akasa special rate: the Direct AWB rate is
-used for 100+ kg, + the same add-on. Hover a CPKG value to see its breakdown; – = no Terminal &amp; Surcharges for that
-flight. Amber product = check the rate condition (hover it to see why). A small <b>N</b> means the tariff has no
-45+/100+ rate on that route, so the N rate is used. <span style="background:{LOWEST_RED};padding:0 4px">Red
-cell</span> = lowest CPKG on the route in that column (45+ kg and 100+ kg separately).</div>
+  <div class="xl-legend">
+    <span><i style="background:{LOWEST_RED}"></i>Lowest CPKG in its column (45+ / 100+ kg)</span>
+    <span><span class="sp" style="margin:0 6px 0 0">SPECIAL</span>Akasa special rate</span>
+    <span><i style="background:{CHECK_AMBER}"></i>Check the rate condition (hover it)</span>
+    <span>Hover a price for its breakdown</span>
+  </div>
+  <details class="xl-note"><summary>How prices are worked out</summary>
+<p>CPKG (₹/kg) = the airline's own tariff rate (45+ / 100+) + Terminal &amp; Surcharges from the Allcargo sheet for that
+flight, matched by flight number (its own flight row, else its product's row, else the route's ALL row).</p>
+<p><b>Akasa</b>: Akasa tariff rate (surcharges already included) + add-on from Akasa's OCDC sheet (origin outbound +
+destination inbound terminal charges, ₹/kg). <span class="sp">SPECIAL</span> flights use the Direct AWB rate for 100+ kg,
++ the same add-on.</p>
+<p>– = no Terminal &amp; Surcharges for that flight. A small <b>N</b> means the tariff has no 45+/100+ rate on that route,
+so the N rate is used.</p>
+  </details>
 </div>""")
