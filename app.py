@@ -141,9 +141,6 @@ SHEET_CSS = f"""
               margin-top: 12px; }}
 .xl-legend i {{ display: inline-block; width: 14px; height: 14px; border-radius: 4px; vertical-align: -2px;
                 margin-right: 6px; }}
-.xl-note {{ color: {MUTED}; font-size: 12px; margin-top: 8px; }}
-.xl-note summary {{ cursor: pointer; font-weight: 600; color: {NAVY}; }}
-.xl-note p {{ margin: 6px 0 0; line-height: 1.55; }}
 @media (max-width: 700px) {{
   .xl-band {{ grid-template-columns: 1fr 1fr; gap: 8px; }}
   .xl-band > div:first-child {{ grid-column: 1 / -1; }}
@@ -594,13 +591,4 @@ st.html(SHEET_CSS + f"""
     <span><i style="background:{CHECK_AMBER}"></i>Check the rate condition (hover it)</span>
     <span>Hover a price for its breakdown</span>
   </div>
-  <details class="xl-note"><summary>How prices are worked out</summary>
-<p>CPKG (₹/kg) = the airline's own tariff rate (45+ / 100+) + Terminal &amp; Surcharges from the Allcargo sheet for that
-flight, matched by flight number (its own flight row, else its product's row, else the route's ALL row).</p>
-<p><b>Akasa</b>: Akasa tariff rate (surcharges already included) + add-on from Akasa's OCDC sheet (origin outbound +
-destination inbound terminal charges, ₹/kg). <span class="sp">SPECIAL</span> flights use the Direct AWB rate for 100+ kg,
-+ the same add-on.</p>
-<p>– = no Terminal &amp; Surcharges for that flight. A small <b>N</b> means the tariff has no 45+/100+ rate on that route,
-so the N rate is used.</p>
-  </details>
 </div>""")
