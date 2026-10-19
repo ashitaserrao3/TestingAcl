@@ -10,7 +10,7 @@ import streamlit as st
 import streamlit_authenticator as stauth
 
 import allcargo
-import publish
+import drive_store
 import tariff_changes
 from tariffapp import database_path, db, queries, sync
 from tariffapp.linker import STATUS_CHECK, STATUS_NO_RATE, STATUS_NO_TARIFF, TariffEngine
@@ -78,7 +78,7 @@ if not st.session_state.get("authentication_status"):
 # =====================================================
 # SIGNED IN: FLIGHT SCHEDULE
 # Everyone who signs in sees the schedule, built from the files in data/
-# (see README). To change the data, replace those files in GitHub.
+# (see README). New airline tariffs Ashita publishes are kept in Google Drive.
 # =====================================================
 
 # Colours: the workbook's navy / green, softened for the web
@@ -99,10 +99,6 @@ SHEET_CSS = f"""
              box-shadow: 0 6px 18px rgba(22, 50, 79, .18); }}
 .xl-title .t {{ font-weight: 700; font-size: 22px; letter-spacing: .12em; }}
 .xl-title .s {{ font-size: 13px; opacity: .8; letter-spacing: .02em; }}
-.xl-chips {{ display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; }}
-.xl-chip {{ background: #fff; border: 1px solid {LINE}; border-radius: 999px; padding: 3px 10px; font-size: 12px;
-            color: {MUTED}; white-space: nowrap; }}
-.xl-chip b {{ color: {INK}; font-weight: 600; }}
 .xl-band {{ display: grid; grid-template-columns: 2.2fr 1fr 1fr 1.2fr; gap: 12px; }}
 .xl-band > div {{ background: #fff; border: 1px solid {LINE}; border-radius: 12px; padding: 12px 16px; min-width: 0;
                   box-shadow: 0 1px 2px rgba(15, 27, 51, .04); }}
@@ -216,6 +212,43 @@ def build_database(signature):
     return path, result
 
 
+def use_rates(files):
+    """Make data/rates hold exactly these files {'rates/<name>': bytes}."""
+    folder = os.path.join(sync.data_dir(), "rates")
+    os.makedirs(folder, exist_ok=True)
+    names = {k.split("/", 1)[1] for k in files}
+    for n in os.listdir(folder):
+        if n not in names:
+            os.remove(os.path.join(folder, n))
+    for key, data in files.items():
+        path = os.path.join(folder, key.split("/", 1)[1])
+        if not os.path.exists(path) or open(path, "rb").read() != data:
+            with open(path, "wb") as f:
+                f.write(data)
+
+
+def drive():
+    """The Google Drive file published tariffs are kept in, or None while Secrets don't set it up."""
+    if not st.secrets.get("drive", {}).get("file_id") or "gcp_service_account" not in st.secrets:
+        return None
+    return drive_store.DriveStore(st.secrets["gcp_service_account"], st.secrets["drive"]["file_id"])
+
+
+@st.cache_resource(show_spinner="Loading the latest published tariffs…")
+def restore_from_drive():
+    """Once per app start: bring back the tariffs last published to Google Drive. -> error message or None"""
+    store = drive()
+    if store is None:
+        return None
+    try:
+        files = {k: v for k, v in store.download().items() if k.startswith("rates/") and k.count("/") == 1}
+    except Exception as e:  # noqa: BLE001 - the app still runs on the tariffs in the repo
+        return f"Couldn't load the published tariffs from Google Drive: {e}"
+    if files:
+        use_rates(files)
+    return None
+
+
 def data_signature():
     """Changes whenever a file in the data folder is added, replaced or removed."""
     paths = [os.path.join(root, n) for root, _, names in os.walk(sync.data_dir()) for n in names]
@@ -259,6 +292,7 @@ def load_extras(signature):
 ss = st.session_state
 today = dt.date.today()
 
+restore_error = restore_from_drive()
 signature = data_signature()
 db_path, sync_result = build_database(signature)
 quote, special, ocdc, extras_errors = load_extras(signature)
@@ -276,18 +310,10 @@ if not ss.get("authentication_status"):
     st.rerun()  # just signed out -> back to the login screen
 
 # =====================================================
-# UPDATE TARIFF (only ADMIN_USER): upload a new airline tariff, review what changed, publish it to GitHub
+# UPDATE TARIFF (only ADMIN_USER): upload a new airline tariff, review what changed, publish it
 # =====================================================
 
 ADMIN_USER = "ashita"
-
-
-def github():
-    """Where published tariffs are saved, or None when [github] isn't in Streamlit Secrets."""
-    cfg = st.secrets.get("github", {})
-    if not cfg.get("token"):
-        return None
-    return publish.GitHub(cfg["token"], cfg.get("repo", "ashitaserrao3/TestingAcl"), cfg.get("branch", "main"))
 
 
 @st.cache_resource(show_spinner="Reading the tariffs in use…", max_entries=1)
@@ -326,23 +352,14 @@ def read_upload(up):
 
 
 def publish_tariff(review, replace):
-    """Save the new tariff to GitHub (and here), replacing the airline's old files or adding to them."""
-    files = {f"data/rates/{review['name']}": review["data"]}
-    if replace:
-        files.update({f"data/rates/{n}": None for n in review["current"] if n != review["name"]})
-    how = "replaces" if replace else "updates the lines in"
-    gh = github()
-    with st.spinner("Saving to GitHub…"):
-        gh.commit(files, f"{review['carrier']} tariff {review['name']} {how} the tariff in use\n\n"
-                         f"Published from the app by {ss.get('username')}.")
-    for path, data in files.items():  # show it here at once; the redeploy from GitHub follows
-        local = os.path.join(sync.data_dir(), path.split("/", 1)[1])
-        if data is None:
-            if os.path.exists(local):
-                os.remove(local)
-        else:
-            with open(local, "wb") as f:
-                f.write(data)
+    """Save the new tariff in Google Drive and here, replacing the airline's old files or adding to them."""
+    folder = os.path.join(sync.data_dir(), "rates")
+    files = {f"rates/{n}": open(os.path.join(folder, n), "rb").read() for n in sorted(os.listdir(folder))
+             if not (replace and n in review["current"])}
+    files[f"rates/{review['name']}"] = review["data"]
+    with st.spinner("Saving to Google Drive…"):
+        drive().upload(files)
+    use_rates(files)
     ss["_published"] = f"{review['carrier']} tariff published: {review['name']}. Everyone sees it now."
     ss.pop("_review", None)
     ss["_upload_n"] = ss.get("_upload_n", 0) + 1  # clears the uploader
@@ -357,8 +374,11 @@ if ss.get("username") == ADMIN_USER:
                                    "the effective date is read from it. You'll see what changes before publishing.")
         if ss.get("_published"):
             st.success(ss.pop("_published"))
-        if github() is None:
-            st.warning("Publishing is off: add the [github] section to Streamlit Secrets (see secrets.toml.example).")
+        if drive() is None:
+            st.warning("Publishing is off: add the [drive] and [gcp_service_account] sections to Streamlit "
+                       "Secrets (see secrets.toml.example).")
+        elif restore_error:
+            st.error(restore_error)
     if up:
         review = read_upload(up)
         with st.container(border=True):
@@ -394,8 +414,8 @@ if ss.get("username") == ADMIN_USER:
                 if review["eff"] is None:
                     problems.append("No effective date found in the file name or the file. Rename it to include "
                                     "the date (e.g. 'Eff. 16th Oct 2026') and upload it again.")
-                if github() is None:
-                    problems.append("Publishing is off until the [github] section is in Streamlit Secrets.")
+                if drive() is None:
+                    problems.append("Publishing is off until Google Drive is set up in Streamlit Secrets.")
                 if review["eff"] and review["eff"] > today:
                     st.info(f"It takes effect on {dmy(review['eff'])}; until then the current rates stay in use.")
                 for p in problems:
@@ -403,8 +423,8 @@ if ss.get("username") == ADMIN_USER:
                 if st.button("Publish", type="primary", disabled=bool(problems)):
                     try:
                         publish_tariff(review, replace=mode.startswith("Replace"))
-                    except RuntimeError as e:
-                        st.error(f"Couldn't save to GitHub, nothing was changed: {e}")
+                    except Exception as e:  # noqa: BLE001 - shown to Ashita
+                        st.error(f"Couldn't save to Google Drive, nothing was changed: {e}")
 
 
 hubs, stations = queries.stations(conn)
@@ -458,13 +478,6 @@ results = eng.price_all(flights)
 weekly = sum(queries.weekly_frequency(r.flight) for r in results)
 status = "SAME CITY" if origin == dest else ("ACTIVE" if weekly else "NO SERVICE")
 
-sched_note = sched_info["label"] + (f" (as on {dmy(sched_info['date'])})"
-                                   if sched_info["date"] and sched_info["date"] != today else "")
-chips = [f"<b>{esc(c)}</b> {dmy(b['EffectiveDate'])}" for c in queries.CARRIER_TABLES if (b := eng.batch(c))]
-chips += [f"<b>Allcargo T&amp;S</b> {esc(quote['wef'])}"] if quote else []
-chips += [f"<b>Akasa special</b> {esc(special['wef'])}"] if special else []
-chips += [f"<b>Schedule</b> {esc(sched_note)}", f"<b>Today</b> {dmy(today)}"]
-rates_line = '<div class="xl-chips">' + "".join(f'<span class="xl-chip">{x}</span>' for x in chips) + "</div>"
 msg = {"SAME CITY": "⚠&nbsp; Please select two different cities as Origin and Destination.",
        "NO SERVICE": "✈&nbsp; No nonstop flights currently operate on this route. "
                      "Please try a different Origin / Destination combination."}.get(status, "")
@@ -575,7 +588,6 @@ if rows_html:
 fill, ink = STATUS_FILL[status]
 st.html(SHEET_CSS + f"""
 <div class="xl">
-  {rates_line}
   <div class="xl-band">
 <div><div class="k">Route</div><div class="v route">{route}</div></div>
 <div><div class="k">Weekly flights</div><div class="v">{weekly}</div></div>
