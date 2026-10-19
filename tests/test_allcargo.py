@@ -26,40 +26,50 @@ def flight(o, d, airline, no):
     return {"Origin": o, "Destination": d, "Airline": airline, "FlightNo": no}
 
 
-def test_terminal_surcharge_prefers_the_flights_own_row(tmp_path):
+def test_rows_are_matched_by_flight_number_first(tmp_path):
     path = tmp_path / "ALLCARGO.xlsx"
     make_quote(path, [
         ("DEL", "CJB", "Air India", "AI 1721", 31.65, None),
         ("DEL", "CJB", "Air India", "ALL", 30.00, None),
         ("DEL", "CJB", "Indigo", "6E 0496", 25.00, None),
         ("DEL", "CJB", "Indigo", "ALL", 23.50, None),
-        ("BOM", "DEL", "AKASA", "QP 1109", None, "Prime Flights, SSP & Console Rate as per attached special rates"),
-        ("BOM", "DEL", "AKASA", "ALL", 19.00, None),
         ("DEL", "TRV", "STAR AIR", "ALL", 12.00, None),
     ])
     assert allcargo.is_quote(path)
     q = allcargo.read_quote(path)
     assert q["wef"] == "01-10-2026"
-    ts = allcargo.terminal_surcharge
-    assert ts(q, flight("DEL", "CJB", "AIRINDIA", "AI1721"), "PRIME") == (31.65, "AI1721")
-    assert ts(q, flight("DEL", "CJB", "AIRINDIA", "AI1753"), "GCR") == (30.00, "ALL")
-    assert ts(q, flight("DEL", "CJB", "INDIGO", "6E496"), "GCR") == (25.00, "6E496")  # '6E 0496' in the sheet
-    assert ts(q, flight("BOM", "DEL", "AKASA", "QP1109"), "PRIME") == (19.00, "ALL")  # own row has no number
-    assert ts(q, flight("DEL", "TVM", "STARAIR", "S5101"), "GCR") == (12.00, "ALL")   # TRV in the sheet
-    assert ts(q, flight("DEL", "BOM", "INDIGO", "6E1"), "GCR") == (None, None)
-    assert ts(None, flight("DEL", "CJB", "INDIGO", "6E1"), "GCR") == (None, None)
+    row = allcargo.quote_row
+    assert row(q, flight("DEL", "CJB", "AIRINDIA", "AI1721"), "PRIME")[1] == "AI1721"
+    assert row(q, flight("DEL", "CJB", "AIRINDIA", "AI1753"), "GCR")[0]["ts"] == 30.00
+    assert row(q, flight("DEL", "CJB", "INDIGO", "6E496"), "GCR")[0]["ts"] == 25.00  # '6E 0496' in the sheet
+    assert row(q, flight("DEL", "TVM", "STARAIR", "S5101"), "GCR")[0]["ts"] == 12.00  # TRV in the sheet
+    assert row(q, flight("DEL", "BOM", "INDIGO", "6E1"), "GCR") == (None, None)
+    assert row(None, flight("DEL", "CJB", "INDIGO", "6E1"), "GCR") == (None, None)
 
 
-def test_special_rate_by_product_or_all():
-    special = {"rows": {("AMD", "CCU", "AKASA", "PRIME"): {"ssp": 30.0, "console": 50.0},
-                        ("BLR", "CCU", "AKASA", "GCR"): {"ssp": 20.0, "console": 42.0},
+def test_special_rate_for_flights_whose_row_points_to_the_special_rates(tmp_path):
+    path = tmp_path / "ALLCARGO.xlsx"
+    prime = "Prime Flights, SSP & Console Rate as per attached special rates"
+    make_quote(path, [
+        ("BOM", "DEL", "AKASA", "QP 1109", None, prime),
+        ("BOM", "DEL", "AKASA", "ALL", 19.71, None),
+        ("DEL", "BOM", "AKASA", "QP 1119", None, "SSP & Console Rate as per attached special rates"),
+        ("DEL", "BOM", "AKASA", "GCR", None, "SSP & Console Rate as per attached special rates"),
+        ("AMD", "PNQ", "AKASA", "GCR", None, prime),
+    ])
+    q = allcargo.read_quote(path)
+    special = {"rows": {("BOM", "DEL", "AKASA", "PRIME"): {"ssp": 26.0, "console": 46.0},
+                        ("DEL", "BOM", "AKASA", "PRIME"): {"ssp": 17.0, "console": 47.0},
+                        ("DEL", "BOM", "AKASA", "GCR"): {"ssp": 16.0, "console": 37.0},
                         ("AMD", "PNQ", "AKASA", "ALL"): {"ssp": 29.0, "console": 49.0}}}
     sr = allcargo.special_rate
-    assert sr(special, flight("AMD", "CCU", "AKASA", "QP1925"), "PRIME")[0]["ssp"] == 30.0
-    assert sr(special, flight("AMD", "CCU", "AKASA", "QP1"), "GCR") == (None, None)  # Prime-only route
-    assert sr(special, flight("BLR", "CCU", "AKASA", "QP1509"), "GCR")[0]["ssp"] == 20.0
-    assert sr(special, flight("AMD", "PNQ", "AKASA", "QP7"), "GCR")[1] == "ALL"
-    assert sr(special, flight("AMD", "CCU", "INDIGO", "6E1"), "PRIME") == (None, None)
+    assert sr(q, special, flight("BOM", "DEL", "AKASA", "QP1109"), "GCR") == (special["rows"][("BOM", "DEL", "AKASA", "PRIME")], "PRIME")
+    assert sr(q, special, flight("BOM", "DEL", "AKASA", "QP1127"), "GCR") == (None, None)   # ALL row has a T&S
+    assert sr(q, special, flight("DEL", "BOM", "AKASA", "QP1119"), "GCR")[1] == "GCR"        # neither says Prime
+    assert sr(q, special, flight("DEL", "BOM", "AKASA", "QP1119"), "PRIME")[1] == "PRIME"    # the tariff says Prime
+    assert sr(q, special, flight("DEL", "BOM", "AKASA", "QP1110"), "GCR")[0]["ssp"] == 16.0  # the GCR row
+    assert sr(q, special, flight("AMD", "PNQ", "AKASA", "QP1911"), "GCR")[1] == "ALL"
+    assert sr(q, None, flight("DEL", "BOM", "AKASA", "QP1119"), "GCR") == (None, None)
 
 
 def test_airline_tariffs_are_not_taken_for_the_quote(tmp_path):
@@ -68,17 +78,3 @@ def test_airline_tariffs_are_not_taken_for_the_quote(tmp_path):
     wb.save(tmp_path / "sg.xlsx")
     assert not allcargo.is_quote(tmp_path / "sg.xlsx")
 
-
-def test_missing_route_is_worked_out_from_origin_and_destination_parts(tmp_path):
-    # T&S = origin part + destination part: DEL is 4.60 above AYJ, BOM's destination part is 15.36 from AYJ
-    path = tmp_path / "ALLCARGO.xlsx"
-    make_quote(path, [
-        ("AYJ", "BOM", "AKASA", "ALL", 15.36, None),
-        ("AYJ", "CCU", "AKASA", "ALL", 13.60, None),
-        ("DEL", "CCU", "AKASA", "ALL", 18.20, None),
-        ("DEL", "BOM", "AKASA", "GCR", None, "SSP & Console Rate as per attached special rates"),
-    ])
-    q = allcargo.read_quote(path)
-    assert allcargo.terminal_surcharge(q, flight("DEL", "BOM", "AKASA", "QP1119"), "GCR") == (19.96, "DERIVED")
-    assert allcargo.terminal_surcharge(q, flight("DEL", "CCU", "AKASA", "QP1"), "GCR") == (18.20, "ALL")
-    assert allcargo.terminal_surcharge(q, flight("DEL", "GOI", "AKASA", "QP2"), "GCR") == (None, None)

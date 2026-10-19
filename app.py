@@ -281,29 +281,31 @@ def category(cat):
 
 def price(r):
     """CPKG at 45+ and 100+: the airline's own tariff rate + Allcargo Terminal & Surcharges for this flight.
-    On an Akasa special-rate route the special SSP rate is the 100+ rate. -> ({45: cell, 100: cell}, special)"""
-    ts, ts_row = allcargo.terminal_surcharge(quote, r.flight, r.product)
-    sp, sp_row = allcargo.special_rate(special, r.flight, r.product)
-    if r.status in (STATUS_NO_TARIFF, STATUS_NO_RATE):
-        sp = None
+    A special-rate flight (its Allcargo row points to the special rates) is the tariff rate at 45+ (Akasa's
+    tariff already includes its surcharge) and the special Direct AWB rate at 100+, with nothing added.
+    -> ({45: cell, 100: cell}, special)"""
+    row, key = allcargo.quote_row(quote, r.flight, r.product)
+    sp, sp_kind = allcargo.special_rate(quote, special, r.flight, r.product)
+    ts = row["ts"] if row else None
+    src = "its own flight row" if key == allcargo.flight_key(r.flight["FlightNo"]) else f"the {key} row"
     cells = {}
     for brk in (45, 100):
         rate, used = r.rate_at(brk)
-        what = f"tariff ({used})"
-        if brk == 100 and sp:
-            rate, used, what = sp["ssp"], "100+", f"Akasa special SSP rate ({category(sp_row)} flights)"
-        if rate is None:
+        if sp:
+            if brk == 100:
+                rate, used = sp["ssp"], "100+"
+                tip = f"{num(rate)} special Direct AWB rate (+100, {category(sp_kind)} flights)"
+            else:
+                tip = f"{num(rate)} tariff ({used}), surcharge included in the tariff rate"
+            cells[brk] = None if rate is None else {"v": rate, "used": used, "tip": tip}
+        elif rate is None:
             cells[brk] = None
         elif ts is None:
-            cells[brk] = {"v": None, "tip": f"{num(rate)} {what}; no Terminal & Surcharges for this flight in "
-                                            "the Allcargo sheet"}
+            cells[brk] = {"v": None, "tip": f"{num(rate)} tariff ({used}); no Terminal & Surcharges for this "
+                                            "flight in the Allcargo sheet"}
         else:
-            src = ("its own flight row" if ts_row == allcargo.flight_key(r.flight["FlightNo"]) else
-                   f"worked out: no number for this route, so {r.flight['Origin']} origin part + "
-                   f"{r.flight['Destination']} destination part from the sheet" if ts_row == "DERIVED" else
-                   f"the {ts_row} row")
             cells[brk] = {"v": round(rate + ts, 2), "used": used,
-                          "tip": f"{num(rate)} {what} + {num(ts)} terminal & surcharges (Allcargo, {src})"}
+                          "tip": f"{num(rate)} tariff ({used}) + {num(ts)} terminal & surcharges (Allcargo, {src})"}
     return cells, sp
 
 
@@ -351,7 +353,7 @@ route_specials = sorted((k[3], v) for k, v in (special or {"rows": {}})["rows"].
 special_msg = ""
 if route_specials and status == "ACTIVE":
     special_msg = ("★&nbsp; Akasa special rate on this route: "
-                   + " · ".join(f"{category(cat)} flights SSP {num(v['ssp'])} (+100), Console {num(v['console'])}"
+                   + " · ".join(f"{category(cat)} flights {num(v['ssp'])} (Direct AWB +100)"
                                 for cat, v in route_specials))
 
 route = f"{esc(names.get(origin) or origin)} ({origin})&nbsp; → &nbsp;{esc(names.get(dest) or dest)} ({dest})"
@@ -379,10 +381,10 @@ st.html(SHEET_CSS + f"""
   {f'<div class="xl-special">{special_msg}</div>' if special_msg else ''}
   {table}
   <div class="xl-note">CPKG (₹/kg) = the airline's own tariff rate (45+ / 100+) + Terminal &amp; Surcharges from the
-Allcargo sheet for that flight (its own flight row, else the route's ALL row; where the sheet has no number for the
-route, it is worked out from the sheet as the airline's origin part + destination part). Hover a CPKG value to see its
-breakdown; – = no Terminal &amp; Surcharges for that flight. <span class="sp">SPECIAL</span> = Akasa special rate: the SSP rate is
-used for 100+ kg. Amber product = check the rate condition (hover it to see why). A small <b>N</b> means the tariff
+Allcargo sheet for that flight, matched by flight number (its own flight row, else its product's row, else the route's
+ALL row). Hover a CPKG value to see its breakdown; – = no Terminal &amp; Surcharges for that flight.
+<span class="sp">SPECIAL</span> = special-rate flight: tariff rate at 45+ (surcharge included) and the special Direct AWB
+rate at 100+, nothing added. Amber product = check the rate condition (hover it to see why). A small <b>N</b> means the tariff
 has no 45+/100+ rate on that route, so the N rate is used. <span style="background:{LOWEST_RED};padding:0 4px">Red
 row</span> = lowest CPKG on the route (100+ kg).</div>
 </div>""")
@@ -391,8 +393,8 @@ if special and special["rows"]:
     with st.expander(f"Akasa special-rate routes ({len(special['rows'])}) · w.e.f. {special['wef']}"):
         body = "".join(
             f"<tr><td class='c'>{esc(o)}</td><td class='c'>{esc(d)}</td><td class='c'>{esc(category(cat))}</td>"
-            f"<td class='cpkg'>{num(v['ssp'])}</td><td class='cpkg'>{num(v['console'])}</td></tr>"
+            f"<td class='cpkg'>{num(v['ssp'])}</td></tr>"
             for (o, d, _, cat), v in sorted(special["rows"].items()))
         st.html(SHEET_CSS + f"""<div class="xl"><table class="xl-table">
-<thead><tr><th>ORIGIN</th><th>DESTINATION</th><th>FLIGHTS</th><th class="cpkg">SSP RATE +100</th>
-<th class="cpkg">CONSOLE RATE</th></tr></thead><tbody>{body}</tbody></table></div>""")
+<thead><tr><th>ORIGIN</th><th>DESTINATION</th><th>FLIGHTS</th><th class="cpkg">DIRECT AWB +100</th></tr></thead>
+<tbody>{body}</tbody></table></div>""")

@@ -8,7 +8,6 @@ The two extra rate sources the Flight Schedule prices with:
   for Prime flights, GCR flights or ALL flights.
 """
 
-import collections
 import re
 
 import openpyxl
@@ -93,44 +92,9 @@ def read_quote(source):
             ts = row[col["ts"]]
             out[key] = {"ts": float(ts) if isinstance(ts, (int, float)) else None,
                         "note": str(row[note]).strip() if note is not None and row[note] else ""}
-        return {"wef": _wef(top), "rows": out, "parts": route_parts(out)}
+        return {"wef": _wef(top), "rows": out}
     finally:
         wb.close()
-
-
-def route_parts(rows):
-    """Per airline, an origin part and a destination part such that a route's Terminal & Surcharges is
-    origin part + destination part. That holds exactly on almost every ALL row of the quotation (e.g. every
-    Akasa DEL value is 4.60 above the AYJ value to the same destination), so it gives the T&S for routes
-    where the sheet has no number. -> {airline: ({origin: part}, {destination: part})}"""
-    out = {}
-    for airline in {k[2] for k in rows}:
-        ts = {k[:2]: v["ts"] for k, v in rows.items() if k[2] == airline and k[3] == "ALL" and v["ts"] is not None}
-        by_o = collections.defaultdict(dict)
-        for (o, d), t in ts.items():
-            by_o[o][d] = t
-        if not by_o:
-            continue
-        ref = max(sorted(by_o), key=lambda o: len(by_o[o]))
-        origin, todo = {ref: 0.0}, set(by_o) - {ref}
-        while todo:  # place each origin by its usual difference to an origin already placed
-            placed = False
-            for o in sorted(todo):
-                diffs = collections.Counter(round(by_o[o][d] - by_o[p][d] + origin[p], 2)
-                                            for p in origin for d in by_o[o] if d in by_o[p])
-                if diffs:
-                    origin[o] = diffs.most_common(1)[0][0]
-                    todo.discard(o)
-                    placed = True
-            if not placed:
-                break
-        dest = {}
-        for d in {d for _, d in ts}:
-            c = collections.Counter(round(t - origin[o], 2) for (o, dd), t in ts.items() if dd == d and o in origin)
-            if c:
-                dest[d] = c.most_common(1)[0][0]
-        out[airline] = (origin, dest)
-    return out
 
 
 def read_special(source):
@@ -152,30 +116,32 @@ def read_special(source):
     return {"wef": _wef([text]), "rows": out}
 
 
-def terminal_surcharge(quote, flight, product):
-    """(T&S ₹/kg, which row it came from) for a schedule flight: its own flight row, else its product's
-    row (e.g. GCR), else the route's ALL row. Rows without a number are skipped. When the sheet has no
-    number for the route, it is worked out from the airline's origin and destination parts ('DERIVED')."""
+def quote_row(quote, flight, product):
+    """The Allcargo row for a schedule flight, matched by flight number: its own flight row, else its
+    product's row (e.g. GCR), else the route's ALL row. -> (row, key) or (None, None)"""
     if not quote:
         return None, None
     o, d, a = station(flight["Origin"]), station(flight["Destination"]), flight["Airline"]
     for k in (flight_key(flight["FlightNo"]), (product or "").upper(), "ALL"):
         row = quote["rows"].get((o, d, a, k))
-        if row and row["ts"] is not None:
-            return row["ts"], k
-    origin, dest = quote.get("parts", {}).get(a, ({}, {}))
-    if o in origin and d in dest:
-        return round(origin[o] + dest[d], 2), "DERIVED"
+        if row:
+            return row, k
     return None, None
 
 
-def special_rate(special, flight, product):
-    """The Akasa special rate for this flight, or None: the route's ALL row, else its product's row."""
-    if not special:
+def special_rate(quote, special, flight, product):
+    """The special Direct AWB rate for a flight whose Allcargo row says 'SSP & Console Rate as per attached
+    special rates' (those rows have no Terminal & Surcharges). The special sheet's ALL row for the route,
+    else its Prime or GCR row: Prime when the airline's tariff or the flight's own Allcargo row says Prime.
+    -> (special row, 'ALL'|'PRIME'|'GCR') or (None, None)"""
+    row, key = quote_row(quote, flight, product)
+    if not special or not row or row["ts"] is not None or "special" not in row["note"].lower():
         return None, None
+    own_row = key not in ("GCR", "ALL", (product or "").upper())
+    prime = (product or "").upper() == "PRIME" or (own_row and "prime" in row["note"].lower())
     o, d, a = station(flight["Origin"]), station(flight["Destination"]), flight["Airline"]
-    for k in ("ALL", (product or "").upper()):
-        row = special["rows"].get((o, d, a, k))
-        if row:
-            return row, k
+    for k in ("ALL", "PRIME" if prime else "GCR"):
+        sp = special["rows"].get((o, d, a, k))
+        if sp:
+            return sp, k
     return None, None
