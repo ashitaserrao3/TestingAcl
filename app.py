@@ -106,7 +106,7 @@ SHEET_CSS = f"""
 .xl-table tbody tr:nth-child(even) td {{ background: {STRIPE}; }}
 .xl-table td.c {{ text-align: center; }}
 .xl-table td.cpkg {{ text-align: center; color: {GREEN_DARK}; font-weight: 700; font-size: 15px; }}
-.xl-table tr.lowest td {{ background: {LOWEST_RED} !important; }}
+.xl-table td.cpkg.lowest {{ background: {LOWEST_RED} !important; }}
 .xl-table td.check {{ background: {CHECK_AMBER} !important; }}
 .xl-table td.muted {{ color: #808080; }}
 .xl-table sup {{ color: #9C5700; font-size: 10px; font-weight: 400; }}
@@ -464,17 +464,11 @@ def price(r):
     return cells, None
 
 
-def lowest_key(cells):
-    """The CPKG a row is compared on: 100+ kg, else 45+ kg."""
-    for brk in (100, 45):
-        if cells[brk] and cells[brk]["v"] is not None:
-            return cells[brk]["v"]
-    return None
-
-
 priced = [(r, *price(r)) for r in results]
-keys = [lowest_key(cells) for _, cells, _ in priced if lowest_key(cells) is not None]
-lowest = min(keys) if keys else None
+lowest = {}  # weight break -> the lowest CPKG in that column
+for brk in (45, 100):
+    values = [cells[brk]["v"] for _, cells, _ in priced if cells[brk] and cells[brk]["v"] is not None]
+    lowest[brk] = min(values) if values else None
 
 rows_html = []
 for r, cells, sp in priced:
@@ -495,11 +489,11 @@ for r, cells, sp in priced:
             tds.append(f'<td class="cpkg muted" title="{esc(cell["tip"])}">–</td>')
         else:
             mark = f"<sup>{cell['used']}</sup>" if cell["used"] != f"{brk}+" else ""
-            tds.append(f'<td class="cpkg" title="{esc(cell["tip"])}">{num(cell["v"])}{mark}</td>')
-    tr = '<tr class="lowest" title="Lowest CPKG on this route">' \
-        if lowest is not None and lowest_key(cells) == lowest else "<tr>"
+            low = ' lowest' if cell["v"] == lowest[brk] else ""
+            tip = cell["tip"] + (f"; lowest {brk}+ kg CPKG on this route" if low else "")
+            tds.append(f'<td class="cpkg{low}" title="{esc(tip)}">{num(cell["v"])}{mark}</td>')
     rows_html.append(
-        f"{tr}<td>{esc(f['Airline'])}</td><td class='c'>{esc(f['FlightNo'])}</td>"
+        f"<tr><td>{esc(f['Airline'])}</td><td class='c'>{esc(f['FlightNo'])}</td>"
         f"<td class='{pcls}' title='{esc(r.match_note)}'>{esc(product)}{badge}</td>"
         f"<td class='c'>{esc(f['DepTime'])}</td>{''.join(tds)}</tr>")
 
@@ -542,5 +536,5 @@ destination inbound terminal charges, ₹/kg). <span class="sp">SPECIAL</span> =
 used for 100+ kg, + the same add-on. Hover a CPKG value to see its breakdown; – = no Terminal &amp; Surcharges for that
 flight. Amber product = check the rate condition (hover it to see why). A small <b>N</b> means the tariff has no
 45+/100+ rate on that route, so the N rate is used. <span style="background:{LOWEST_RED};padding:0 4px">Red
-row</span> = lowest CPKG on the route (100+ kg).</div>
+cell</span> = lowest CPKG on the route in that column (45+ kg and 100+ kg separately).</div>
 </div>""")

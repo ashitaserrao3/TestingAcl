@@ -4,7 +4,7 @@ Just a dummy acl website to test and track the updates and push new changes/requ
 
 A Streamlit **Flight Schedule**: pick Origin and Destination to see the route, weekly
 flights, flight count, status, and every flight with its product, ETD and
-**CPKG (₹/kg) at 45+ and 100+ kg**. The lowest CPKG on the route is shown in light red.
+**CPKG (₹/kg) at 45+ and 100+ kg**. The lowest CPKG on the route in each column is shown in light red.
 
 **CPKG = the airline's own tariff rate (45+ / 100+) + Terminal & Surcharges** from the
 Allcargo rate quotation, for that flight: its own flight-number row, else its product's
