@@ -10,7 +10,7 @@ import streamlit as st
 import streamlit_authenticator as stauth
 
 import allcargo
-import drive_store
+import supabase_store
 import tariff_changes
 from tariffapp import database_path, db, queries, sync
 from tariffapp.linker import STATUS_CHECK, STATUS_NO_RATE, STATUS_NO_TARIFF, TariffEngine
@@ -78,7 +78,7 @@ if not st.session_state.get("authentication_status"):
 # =====================================================
 # SIGNED IN: FLIGHT SCHEDULE
 # Everyone who signs in sees the schedule, built from the files in data/
-# (see README). New airline tariffs Ashita publishes are kept in Google Drive.
+# (see README). New airline tariffs Ashita publishes are kept in Supabase Storage.
 # =====================================================
 
 # Colours: the workbook's navy / green, softened for the web
@@ -227,23 +227,24 @@ def use_rates(files):
                 f.write(data)
 
 
-def drive():
-    """The Google Drive file published tariffs are kept in, or None while Secrets don't set it up."""
-    if not st.secrets.get("drive", {}).get("file_id") or "gcp_service_account" not in st.secrets:
+def cloud():
+    """The Supabase bucket published tariffs are kept in, or None while Secrets don't set it up."""
+    cfg = st.secrets.get("supabase", {})
+    if not cfg.get("url") or not cfg.get("key"):
         return None
-    return drive_store.DriveStore(st.secrets["gcp_service_account"], st.secrets["drive"]["file_id"])
+    return supabase_store.SupabaseStore(cfg["url"], cfg["key"], cfg.get("bucket", "tariffs"))
 
 
 @st.cache_resource(show_spinner="Loading the latest published tariffs…")
-def restore_from_drive():
-    """Once per app start: bring back the tariffs last published to Google Drive. -> error message or None"""
-    store = drive()
+def restore_published():
+    """Once per app start: bring back the tariffs last published to Supabase. -> error message or None"""
+    store = cloud()
     if store is None:
         return None
     try:
         files = {k: v for k, v in store.download().items() if k.startswith("rates/") and k.count("/") == 1}
     except Exception as e:  # noqa: BLE001 - the app still runs on the tariffs in the repo
-        return f"Couldn't load the published tariffs from Google Drive: {e}"
+        return f"Couldn't load the published tariffs from Supabase: {e}"
     if files:
         use_rates(files)
     return None
@@ -292,7 +293,7 @@ def load_extras(signature):
 ss = st.session_state
 today = dt.date.today()
 
-restore_error = restore_from_drive()
+restore_error = restore_published()
 signature = data_signature()
 db_path, sync_result = build_database(signature)
 quote, special, ocdc, extras_errors = load_extras(signature)
@@ -352,13 +353,13 @@ def read_upload(up):
 
 
 def publish_tariff(review, replace):
-    """Save the new tariff in Google Drive and here, replacing the airline's old files or adding to them."""
+    """Save the new tariff in Supabase and here, replacing the airline's old files or adding to them."""
     folder = os.path.join(sync.data_dir(), "rates")
     files = {f"rates/{n}": open(os.path.join(folder, n), "rb").read() for n in sorted(os.listdir(folder))
              if not (replace and n in review["current"])}
     files[f"rates/{review['name']}"] = review["data"]
-    with st.spinner("Saving to Google Drive…"):
-        drive().upload(files)
+    with st.spinner("Saving…"):
+        cloud().upload(files)
     use_rates(files)
     ss["_published"] = f"{review['carrier']} tariff published: {review['name']}. Everyone sees it now."
     ss.pop("_review", None)
@@ -374,9 +375,9 @@ if ss.get("username") == ADMIN_USER:
                                    "the effective date is read from it. You'll see what changes before publishing.")
         if ss.get("_published"):
             st.success(ss.pop("_published"))
-        if drive() is None:
-            st.warning("Publishing is off: add the [drive] and [gcp_service_account] sections to Streamlit "
-                       "Secrets (see secrets.toml.example).")
+        if cloud() is None:
+            st.warning("Publishing is off: add the [supabase] section to Streamlit Secrets "
+                       "(see secrets.toml.example).")
         elif restore_error:
             st.error(restore_error)
     if up:
@@ -414,8 +415,8 @@ if ss.get("username") == ADMIN_USER:
                 if review["eff"] is None:
                     problems.append("No effective date found in the file name or the file. Rename it to include "
                                     "the date (e.g. 'Eff. 16th Oct 2026') and upload it again.")
-                if drive() is None:
-                    problems.append("Publishing is off until Google Drive is set up in Streamlit Secrets.")
+                if cloud() is None:
+                    problems.append("Publishing is off until Supabase is set up in Streamlit Secrets.")
                 if review["eff"] and review["eff"] > today:
                     st.info(f"It takes effect on {dmy(review['eff'])}; until then the current rates stay in use.")
                 for p in problems:
@@ -424,7 +425,7 @@ if ss.get("username") == ADMIN_USER:
                     try:
                         publish_tariff(review, replace=mode.startswith("Replace"))
                     except Exception as e:  # noqa: BLE001 - shown to Ashita
-                        st.error(f"Couldn't save to Google Drive, nothing was changed: {e}")
+                        st.error(f"Couldn't save, nothing was changed: {e}")
 
 
 hubs, stations = queries.stations(conn)

@@ -35,10 +35,10 @@ tariff in use (changed rates, new lines, lines not in the new file). Then choose
   line stays as it is (the newest file wins for each line it has).
 * *Replace the whole tariff* – for a complete new tariff; the old file is removed.
 
-*Publish* saves the tariffs in one file in Ashita's Google Drive (not in GitHub; needs the
-`[drive]` and `[gcp_service_account]` sections in Secrets, see `secrets.toml.example`).
-Everyone sees the new rates at once, and the app loads them back from Drive whenever it
-restarts, so they stay until the next upload.
+*Publish* saves the tariffs in a private Supabase Storage bucket (not in GitHub; needs the
+`[supabase]` section in Secrets, see `secrets.toml.example`). Everyone sees the new rates
+at once, and the app loads them back from Supabase whenever it restarts, so they stay
+until the next upload.
 
 **To change the data:** on GitHub open the folder, click *Add file → Upload files*,
 drop in the new file, delete the old one, and *Commit changes*. Streamlit Cloud
