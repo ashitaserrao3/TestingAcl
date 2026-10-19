@@ -284,8 +284,8 @@ def price(r):
     A special-rate flight (its Allcargo row points to the special rates) is the tariff rate at 45+ (Akasa's
     tariff already includes its surcharge) and the special Direct AWB rate at 100+, with nothing added.
     -> ({45: cell, 100: cell}, special)"""
-    row, key = allcargo.quote_row(quote, r.flight, r.product)
     sp, sp_kind = allcargo.special_rate(quote, special, r.flight, r.product)
+    row, key = allcargo.quote_row(quote, r.flight, r.product, with_number=True)
     ts = row["ts"] if row else None
     src = "its own flight row" if key == allcargo.flight_key(r.flight["FlightNo"]) else f"the {key} row"
     cells = {}

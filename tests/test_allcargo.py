@@ -63,10 +63,14 @@ def test_special_rate_for_flights_whose_row_points_to_the_special_rates(tmp_path
                         ("DEL", "BOM", "AKASA", "GCR"): {"ssp": 16.0, "console": 37.0},
                         ("AMD", "PNQ", "AKASA", "ALL"): {"ssp": 29.0, "console": 49.0}}}
     sr = allcargo.special_rate
-    assert sr(q, special, flight("BOM", "DEL", "AKASA", "QP1109"), "GCR") == (special["rows"][("BOM", "DEL", "AKASA", "PRIME")], "PRIME")
+    assert sr(q, special, flight("BOM", "DEL", "AKASA", "QP1109"), "PRIME")[1] == "PRIME"
+    # the tariff says GCR and the special sheet has only a Prime rate: the tariff wins, no special rate,
+    # and the flight takes the Terminal & Surcharges of the route's ALL row
+    assert sr(q, special, flight("BOM", "DEL", "AKASA", "QP1109"), "GCR") == (None, None)
+    assert allcargo.quote_row(q, flight("BOM", "DEL", "AKASA", "QP1109"), "GCR", with_number=True)[0]["ts"] == 19.71
     assert sr(q, special, flight("BOM", "DEL", "AKASA", "QP1127"), "GCR") == (None, None)   # ALL row has a T&S
-    assert sr(q, special, flight("DEL", "BOM", "AKASA", "QP1119"), "GCR")[1] == "GCR"        # neither says Prime
-    assert sr(q, special, flight("DEL", "BOM", "AKASA", "QP1119"), "PRIME")[1] == "PRIME"    # the tariff says Prime
+    assert sr(q, special, flight("DEL", "BOM", "AKASA", "QP1119"), "GCR")[1] == "GCR"
+    assert sr(q, special, flight("DEL", "BOM", "AKASA", "QP1119"), "PRIME")[1] == "PRIME"
     assert sr(q, special, flight("DEL", "BOM", "AKASA", "QP1110"), "GCR")[0]["ssp"] == 16.0  # the GCR row
     assert sr(q, special, flight("AMD", "PNQ", "AKASA", "QP1911"), "GCR")[1] == "ALL"
     assert sr(q, None, flight("DEL", "BOM", "AKASA", "QP1119"), "GCR") == (None, None)

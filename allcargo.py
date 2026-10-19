@@ -116,31 +116,30 @@ def read_special(source):
     return {"wef": _wef([text]), "rows": out}
 
 
-def quote_row(quote, flight, product):
+def quote_row(quote, flight, product, with_number=False):
     """The Allcargo row for a schedule flight, matched by flight number: its own flight row, else its
-    product's row (e.g. GCR), else the route's ALL row. -> (row, key) or (None, None)"""
+    product's row (e.g. GCR), else the route's ALL row. With with_number, rows without a Terminal &
+    Surcharges number are skipped. -> (row, key) or (None, None)"""
     if not quote:
         return None, None
     o, d, a = station(flight["Origin"]), station(flight["Destination"]), flight["Airline"]
     for k in (flight_key(flight["FlightNo"]), (product or "").upper(), "ALL"):
         row = quote["rows"].get((o, d, a, k))
-        if row:
+        if row and (row["ts"] is not None or not with_number):
             return row, k
     return None, None
 
 
 def special_rate(quote, special, flight, product):
     """The special Direct AWB rate for a flight whose Allcargo row says 'SSP & Console Rate as per attached
-    special rates' (those rows have no Terminal & Surcharges). The special sheet's ALL row for the route,
-    else its Prime or GCR row: Prime when the airline's tariff or the flight's own Allcargo row says Prime.
-    -> (special row, 'ALL'|'PRIME'|'GCR') or (None, None)"""
-    row, key = quote_row(quote, flight, product)
+    special rates' (those rows have no Terminal & Surcharges): the special sheet's ALL row for the route,
+    else the row for the flight's product in the airline's tariff (Prime or GCR) - the tariff decides when
+    the files disagree. -> (special row, 'ALL'|'PRIME'|'GCR') or (None, None)"""
+    row, _ = quote_row(quote, flight, product)
     if not special or not row or row["ts"] is not None or "special" not in row["note"].lower():
         return None, None
-    own_row = key not in ("GCR", "ALL", (product or "").upper())
-    prime = (product or "").upper() == "PRIME" or (own_row and "prime" in row["note"].lower())
     o, d, a = station(flight["Origin"]), station(flight["Destination"]), flight["Airline"]
-    for k in ("ALL", "PRIME" if prime else "GCR"):
+    for k in ("ALL", "PRIME" if (product or "").upper() == "PRIME" else "GCR"):
         sp = special["rows"].get((o, d, a, k))
         if sp:
             return sp, k
