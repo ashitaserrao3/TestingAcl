@@ -67,3 +67,18 @@ def test_airline_tariffs_are_not_taken_for_the_quote(tmp_path):
     wb.active.append([" Common User Terminal Charges (16-Apr-2026)"])  # as in SpiceJet's CUT Charges sheet
     wb.save(tmp_path / "sg.xlsx")
     assert not allcargo.is_quote(tmp_path / "sg.xlsx")
+
+
+def test_missing_route_is_worked_out_from_origin_and_destination_parts(tmp_path):
+    # T&S = origin part + destination part: DEL is 4.60 above AYJ, BOM's destination part is 15.36 from AYJ
+    path = tmp_path / "ALLCARGO.xlsx"
+    make_quote(path, [
+        ("AYJ", "BOM", "AKASA", "ALL", 15.36, None),
+        ("AYJ", "CCU", "AKASA", "ALL", 13.60, None),
+        ("DEL", "CCU", "AKASA", "ALL", 18.20, None),
+        ("DEL", "BOM", "AKASA", "GCR", None, "SSP & Console Rate as per attached special rates"),
+    ])
+    q = allcargo.read_quote(path)
+    assert allcargo.terminal_surcharge(q, flight("DEL", "BOM", "AKASA", "QP1119"), "GCR") == (19.96, "DERIVED")
+    assert allcargo.terminal_surcharge(q, flight("DEL", "CCU", "AKASA", "QP1"), "GCR") == (18.20, "ALL")
+    assert allcargo.terminal_surcharge(q, flight("DEL", "GOI", "AKASA", "QP2"), "GCR") == (None, None)

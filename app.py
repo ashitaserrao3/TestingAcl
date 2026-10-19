@@ -274,6 +274,11 @@ if status == "ACTIVE" and not quote:
     msg = "Terminal & Surcharges aren't loaded yet, so CPKG is blank. Add the Allcargo sheet to data/allcargo."
 
 
+def category(cat):
+    """'PRIME' -> 'Prime', 'ALL' -> 'All', 'GCR' stays 'GCR'."""
+    return {"PRIME": "Prime", "ALL": "All"}.get(cat, cat)
+
+
 def price(r):
     """CPKG at 45+ and 100+: the airline's own tariff rate + Allcargo Terminal & Surcharges for this flight.
     On an Akasa special-rate route the special SSP rate is the 100+ rate. -> ({45: cell, 100: cell}, special)"""
@@ -286,14 +291,17 @@ def price(r):
         rate, used = r.rate_at(brk)
         what = f"tariff ({used})"
         if brk == 100 and sp:
-            rate, used, what = sp["ssp"], "100+", f"Akasa special SSP rate ({sp_row.title()} flights)"
+            rate, used, what = sp["ssp"], "100+", f"Akasa special SSP rate ({category(sp_row)} flights)"
         if rate is None:
             cells[brk] = None
         elif ts is None:
             cells[brk] = {"v": None, "tip": f"{num(rate)} {what}; no Terminal & Surcharges for this flight in "
                                             "the Allcargo sheet"}
         else:
-            src = "its own flight row" if ts_row == allcargo.flight_key(r.flight["FlightNo"]) else f"the {ts_row} row"
+            src = ("its own flight row" if ts_row == allcargo.flight_key(r.flight["FlightNo"]) else
+                   f"worked out: no number for this route, so {r.flight['Origin']} origin part + "
+                   f"{r.flight['Destination']} destination part from the sheet" if ts_row == "DERIVED" else
+                   f"the {ts_row} row")
             cells[brk] = {"v": round(rate + ts, 2), "used": used,
                           "tip": f"{num(rate)} {what} + {num(ts)} terminal & surcharges (Allcargo, {src})"}
     return cells, sp
@@ -343,7 +351,7 @@ route_specials = sorted((k[3], v) for k, v in (special or {"rows": {}})["rows"].
 special_msg = ""
 if route_specials and status == "ACTIVE":
     special_msg = ("★&nbsp; Akasa special rate on this route: "
-                   + " · ".join(f"{cat.title()} flights SSP {num(v['ssp'])} (+100), Console {num(v['console'])}"
+                   + " · ".join(f"{category(cat)} flights SSP {num(v['ssp'])} (+100), Console {num(v['console'])}"
                                 for cat, v in route_specials))
 
 route = f"{esc(names.get(origin) or origin)} ({origin})&nbsp; → &nbsp;{esc(names.get(dest) or dest)} ({dest})"
@@ -371,8 +379,9 @@ st.html(SHEET_CSS + f"""
   {f'<div class="xl-special">{special_msg}</div>' if special_msg else ''}
   {table}
   <div class="xl-note">CPKG (₹/kg) = the airline's own tariff rate (45+ / 100+) + Terminal &amp; Surcharges from the
-Allcargo sheet for that flight (its own flight row, else the route's ALL row). Hover a CPKG value to see its breakdown;
-– = no Terminal &amp; Surcharges for that flight. <span class="sp">SPECIAL</span> = Akasa special rate: the SSP rate is
+Allcargo sheet for that flight (its own flight row, else the route's ALL row; where the sheet has no number for the
+route, it is worked out from the sheet as the airline's origin part + destination part). Hover a CPKG value to see its
+breakdown; – = no Terminal &amp; Surcharges for that flight. <span class="sp">SPECIAL</span> = Akasa special rate: the SSP rate is
 used for 100+ kg. Amber product = check the rate condition (hover it to see why). A small <b>N</b> means the tariff
 has no 45+/100+ rate on that route, so the N rate is used. <span style="background:{LOWEST_RED};padding:0 4px">Red
 row</span> = lowest CPKG on the route (100+ kg).</div>
@@ -381,7 +390,7 @@ row</span> = lowest CPKG on the route (100+ kg).</div>
 if special and special["rows"]:
     with st.expander(f"Akasa special-rate routes ({len(special['rows'])}) · w.e.f. {special['wef']}"):
         body = "".join(
-            f"<tr><td class='c'>{esc(o)}</td><td class='c'>{esc(d)}</td><td class='c'>{esc(cat.title())}</td>"
+            f"<tr><td class='c'>{esc(o)}</td><td class='c'>{esc(d)}</td><td class='c'>{esc(category(cat))}</td>"
             f"<td class='cpkg'>{num(v['ssp'])}</td><td class='cpkg'>{num(v['console'])}</td></tr>"
             for (o, d, _, cat), v in sorted(special["rows"].items()))
         st.html(SHEET_CSS + f"""<div class="xl"><table class="xl-table">

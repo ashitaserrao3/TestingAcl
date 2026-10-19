@@ -8,6 +8,7 @@ The two extra rate sources the Flight Schedule prices with:
   for Prime flights, GCR flights or ALL flights.
 """
 
+import collections
 import re
 
 import openpyxl
@@ -92,9 +93,44 @@ def read_quote(source):
             ts = row[col["ts"]]
             out[key] = {"ts": float(ts) if isinstance(ts, (int, float)) else None,
                         "note": str(row[note]).strip() if note is not None and row[note] else ""}
-        return {"wef": _wef(top), "rows": out}
+        return {"wef": _wef(top), "rows": out, "parts": route_parts(out)}
     finally:
         wb.close()
+
+
+def route_parts(rows):
+    """Per airline, an origin part and a destination part such that a route's Terminal & Surcharges is
+    origin part + destination part. That holds exactly on almost every ALL row of the quotation (e.g. every
+    Akasa DEL value is 4.60 above the AYJ value to the same destination), so it gives the T&S for routes
+    where the sheet has no number. -> {airline: ({origin: part}, {destination: part})}"""
+    out = {}
+    for airline in {k[2] for k in rows}:
+        ts = {k[:2]: v["ts"] for k, v in rows.items() if k[2] == airline and k[3] == "ALL" and v["ts"] is not None}
+        by_o = collections.defaultdict(dict)
+        for (o, d), t in ts.items():
+            by_o[o][d] = t
+        if not by_o:
+            continue
+        ref = max(sorted(by_o), key=lambda o: len(by_o[o]))
+        origin, todo = {ref: 0.0}, set(by_o) - {ref}
+        while todo:  # place each origin by its usual difference to an origin already placed
+            placed = False
+            for o in sorted(todo):
+                diffs = collections.Counter(round(by_o[o][d] - by_o[p][d] + origin[p], 2)
+                                            for p in origin for d in by_o[o] if d in by_o[p])
+                if diffs:
+                    origin[o] = diffs.most_common(1)[0][0]
+                    todo.discard(o)
+                    placed = True
+            if not placed:
+                break
+        dest = {}
+        for d in {d for _, d in ts}:
+            c = collections.Counter(round(t - origin[o], 2) for (o, dd), t in ts.items() if dd == d and o in origin)
+            if c:
+                dest[d] = c.most_common(1)[0][0]
+        out[airline] = (origin, dest)
+    return out
 
 
 def read_special(source):
@@ -118,7 +154,8 @@ def read_special(source):
 
 def terminal_surcharge(quote, flight, product):
     """(T&S ₹/kg, which row it came from) for a schedule flight: its own flight row, else its product's
-    row (e.g. GCR), else the route's ALL row. Rows without a number are skipped."""
+    row (e.g. GCR), else the route's ALL row. Rows without a number are skipped. When the sheet has no
+    number for the route, it is worked out from the airline's origin and destination parts ('DERIVED')."""
     if not quote:
         return None, None
     o, d, a = station(flight["Origin"]), station(flight["Destination"]), flight["Airline"]
@@ -126,6 +163,9 @@ def terminal_surcharge(quote, flight, product):
         row = quote["rows"].get((o, d, a, k))
         if row and row["ts"] is not None:
             return row["ts"], k
+    origin, dest = quote.get("parts", {}).get(a, ({}, {}))
+    if o in origin and d in dest:
+        return round(origin[o] + dest[d], 2), "DERIVED"
     return None, None
 
 
