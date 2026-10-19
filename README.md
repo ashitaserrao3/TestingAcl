@@ -7,10 +7,13 @@ flights, flight count, status, and every flight with its product, ETD and
 **CPKG (₹/kg) at 45+ and 100+ kg**. The lowest CPKG on the route is shown in light red.
 
 **CPKG = the airline's own tariff rate (45+ / 100+) + Terminal & Surcharges** from the
-Allcargo rate quotation, for that flight: its own flight-number row, else the route's
-`ALL` row. Hover a CPKG value to see its breakdown. On an **Akasa special-rate route**
-(marked SPECIAL), the special SSP rate is used for 100+ kg; all special routes are
-listed under the table.
+Allcargo rate quotation, for that flight: its own flight-number row, else its product's
+row, else the route's `ALL` row. Hover a CPKG value to see its breakdown.
+
+**Akasa** is priced from the Akasa tariff alone: its rate (surcharges are already
+included) + an add-on from its OCDC sheet (origin outbound + destination inbound
+general-cargo ₹/kg terminal charges). Flights the Akasa special-rates file covers
+(marked SPECIAL) take its Direct AWB rate for 100+ kg, plus the same add-on.
 
 * Everyone must sign in. Everyone who signs in sees the Flight Schedule.
 

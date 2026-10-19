@@ -544,13 +544,3 @@ flight. Amber product = check the rate condition (hover it to see why). A small 
 45+/100+ rate on that route, so the N rate is used. <span style="background:{LOWEST_RED};padding:0 4px">Red
 row</span> = lowest CPKG on the route (100+ kg).</div>
 </div>""")
-
-if special and special["rows"]:
-    with st.expander(f"Akasa special-rate routes ({len(special['rows'])}) · w.e.f. {special['wef']}"):
-        body = "".join(
-            f"<tr><td class='c'>{esc(o)}</td><td class='c'>{esc(d)}</td><td class='c'>{esc(category(cat))}</td>"
-            f"<td class='cpkg'>{num(v['ssp'])}</td></tr>"
-            for (o, d, _, cat), v in sorted(special["rows"].items()))
-        st.html(SHEET_CSS + f"""<div class="xl"><table class="xl-table">
-<thead><tr><th>ORIGIN</th><th>DESTINATION</th><th>FLIGHTS</th><th class="cpkg">DIRECT AWB +100</th></tr></thead>
-<tbody>{body}</tbody></table></div>""")
