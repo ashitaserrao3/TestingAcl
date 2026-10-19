@@ -185,11 +185,11 @@ def newest(folder, extensions):
     return max(paths, key=lambda p: (os.path.getmtime(p), p), default=None)
 
 
-@st.cache_resource(show_spinner="Loading the Allcargo and special rates…", max_entries=1)
+@st.cache_resource(show_spinner="Loading the Allcargo, OCDC and special rates…", max_entries=1)
 def load_extras(signature):
-    """(Allcargo quotation, Akasa special rates, errors) from the data folder."""
+    """(Allcargo quotation, Akasa special rates, Akasa OCDC station charges, errors) from the data folder."""
     quote = special = None
-    errors = []
+    ocdc, errors = {}, []
     for sub, ext, reader in (("allcargo", sync.XLSX, allcargo.read_quote), ("special", (".pdf",), allcargo.read_special)):
         path = newest(os.path.join(sync.data_dir(), sub), ext)
         if not path:
@@ -201,9 +201,16 @@ def load_extras(signature):
                 quote = data
             else:
                 special = data
-        except Exception as e:  # noqa: BLE001 - shown to Ashita
+        except Exception as e:  # noqa: BLE001 - shown on the page
             errors.append(f"{os.path.basename(path)}: {e}")
-    return quote, special, errors
+    rates = os.path.join(sync.data_dir(), "rates")
+    for name in sorted(os.listdir(rates)) if os.path.isdir(rates) else []:
+        if name.lower().endswith(sync.XLSX) and not ocdc:
+            try:
+                ocdc = allcargo.read_ocdc(os.path.join(rates, name))  # only the Akasa tariff has an OCDC sheet
+            except Exception as e:  # noqa: BLE001 - shown on the page
+                errors.append(f"{name}: {e}")
+    return quote, special, ocdc, errors
 
 
 ss = st.session_state
@@ -211,9 +218,12 @@ today = dt.date.today()
 
 signature = data_signature()
 db_path, sync_result = build_database(signature)
-quote, special, extras_errors = load_extras(signature)
+quote, special, ocdc, extras_errors = load_extras(signature)
 conn = db.connect(db_path)
 sched_info = queries.schedule_info(conn, today)
+
+for e in sync_result["errors"] + extras_errors:
+    st.error(f"Couldn't read {e}")
 
 top = st.columns([6, 2, 1], vertical_alignment="center")
 top[1].caption(f"Signed in as **{esc(ss.get('name'))}**")
@@ -280,25 +290,35 @@ def category(cat):
 
 
 def price(r):
-    """CPKG at 45+ and 100+: the airline's own tariff rate + Allcargo Terminal & Surcharges for this flight.
-    A special-rate flight (its Allcargo row points to the special rates) is the tariff rate at 45+ (Akasa's
-    tariff already includes its surcharge) and the special Direct AWB rate at 100+, with nothing added.
-    -> ({45: cell, 100: cell}, special)"""
-    sp, sp_kind = allcargo.special_rate(quote, special, r.flight, r.product)
-    row, key = allcargo.quote_row(quote, r.flight, r.product, with_number=True)
+    """CPKG at 45+ and 100+. Akasa: its tariff rate (surcharges are already in it) + the OCDC add-on (origin
+    outbound + destination inbound terminal charges); where the special-rates file covers the flight, its
+    Direct AWB rate replaces the 100+ rate, + the same add-on. Other airlines: their tariff rate + the
+    Allcargo Terminal & Surcharges for the flight. -> ({45: cell, 100: cell}, special)"""
+    f = r.flight
+    if f["Airline"] == "AKASA":
+        addon, how = allcargo.ocdc_addon(ocdc, f)
+        sp, sp_kind = allcargo.special_rate(special, f, r.product)
+        cells = {}
+        for brk in (45, 100):
+            rate, used = r.rate_at(brk)
+            what = f"Akasa tariff ({used}, surcharge included)"
+            if brk == 100 and sp:
+                rate, used, what = sp["ssp"], "100+", f"special Direct AWB rate (+100, {category(sp_kind)} flights)"
+            if rate is None:
+                cells[brk] = None
+            elif addon is None:
+                cells[brk] = {"v": None, "tip": f"{num(rate)} {what}; no OCDC terminal charges for these stations"}
+            else:
+                cells[brk] = {"v": round(rate + addon, 2), "used": used,
+                              "tip": f"{num(rate)} {what} + {num(addon)} add-on (OCDC: {how})"}
+        return cells, sp
+    row, key = allcargo.quote_row(quote, f, r.product, with_number=True)
     ts = row["ts"] if row else None
-    src = "its own flight row" if key == allcargo.flight_key(r.flight["FlightNo"]) else f"the {key} row"
+    src = "its own flight row" if key == allcargo.flight_key(f["FlightNo"]) else f"the {key} row"
     cells = {}
     for brk in (45, 100):
         rate, used = r.rate_at(brk)
-        if sp:
-            if brk == 100:
-                rate, used = sp["ssp"], "100+"
-                tip = f"{num(rate)} special Direct AWB rate (+100, {category(sp_kind)} flights)"
-            else:
-                tip = f"{num(rate)} tariff ({used}), surcharge included in the tariff rate"
-            cells[brk] = None if rate is None else {"v": rate, "used": used, "tip": tip}
-        elif rate is None:
+        if rate is None:
             cells[brk] = None
         elif ts is None:
             cells[brk] = {"v": None, "tip": f"{num(rate)} tariff ({used}); no Terminal & Surcharges for this "
@@ -306,7 +326,7 @@ def price(r):
         else:
             cells[brk] = {"v": round(rate + ts, 2), "used": used,
                           "tip": f"{num(rate)} tariff ({used}) + {num(ts)} terminal & surcharges (Allcargo, {src})"}
-    return cells, sp
+    return cells, None
 
 
 def lowest_key(cells):
@@ -353,7 +373,7 @@ route_specials = sorted((k[3], v) for k, v in (special or {"rows": {}})["rows"].
 special_msg = ""
 if route_specials and status == "ACTIVE":
     special_msg = ("★&nbsp; Akasa special rate on this route: "
-                   + " · ".join(f"{category(cat)} flights {num(v['ssp'])} (Direct AWB +100)"
+                   + " · ".join(f"{category(cat)} flights {num(v['ssp'])} (Direct AWB +100, plus add-on)"
                                 for cat, v in route_specials))
 
 route = f"{esc(names.get(origin) or origin)} ({origin})&nbsp; → &nbsp;{esc(names.get(dest) or dest)} ({dest})"
@@ -382,10 +402,11 @@ st.html(SHEET_CSS + f"""
   {table}
   <div class="xl-note">CPKG (₹/kg) = the airline's own tariff rate (45+ / 100+) + Terminal &amp; Surcharges from the
 Allcargo sheet for that flight, matched by flight number (its own flight row, else its product's row, else the route's
-ALL row). Hover a CPKG value to see its breakdown; – = no Terminal &amp; Surcharges for that flight.
-<span class="sp">SPECIAL</span> = special-rate flight: tariff rate at 45+ (surcharge included) and the special Direct AWB
-rate at 100+, nothing added. Amber product = check the rate condition (hover it to see why). A small <b>N</b> means the tariff
-has no 45+/100+ rate on that route, so the N rate is used. <span style="background:{LOWEST_RED};padding:0 4px">Red
+ALL row). <b>Akasa</b>: Akasa tariff rate (surcharges already included) + add-on from Akasa's OCDC sheet (origin outbound +
+destination inbound terminal charges, ₹/kg). <span class="sp">SPECIAL</span> = Akasa special rate: the Direct AWB rate is
+used for 100+ kg, + the same add-on. Hover a CPKG value to see its breakdown; – = no Terminal &amp; Surcharges for that
+flight. Amber product = check the rate condition (hover it to see why). A small <b>N</b> means the tariff has no
+45+/100+ rate on that route, so the N rate is used. <span style="background:{LOWEST_RED};padding:0 4px">Red
 row</span> = lowest CPKG on the route (100+ kg).</div>
 </div>""")
 

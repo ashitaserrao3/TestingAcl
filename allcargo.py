@@ -1,11 +1,14 @@
 """
-The two extra rate sources the Flight Schedule prices with:
+The extra rate sources the Flight Schedule prices with:
 
 * Allcargo rate quotation (Index Global, .xlsx): one row per origin, destination,
   airline and flight (a flight number, ALL, or a product such as GCR). Its
-  `Terminal&Surcharges` column is added to the airline's own tariff rate.
-* Akasa special rates (.pdf): an SSP rate for +100 kg on a few Akasa routes,
-  for Prime flights, GCR flights or ALL flights.
+  `Terminal&Surcharges` column is added to the airline's own tariff rate
+  (not for Akasa, see below).
+* Akasa's OCDC sheet (in the Akasa tariff): station charges. Akasa flights add
+  the origin's outbound + destination's inbound general-cargo ₹/kg charges.
+* Akasa special rates (.pdf): a Direct AWB rate for +100 kg on a few Akasa
+  routes, for Prime flights, GCR flights or ALL flights.
 """
 
 import re
@@ -116,6 +119,62 @@ def read_special(source):
     return {"wef": _wef([text]), "rows": out}
 
 
+# OCDC categories that aren't general-cargo per-kg terminal charges
+_NOT_GENERAL = ("special", "dgr", "avi", "live animal", "ice checklist", "valuable", "demurrage", "demmurrage",
+                "storage")
+
+
+def _rate(v):
+    m = re.search(r"(\d+(?:\.\d+)?)", str(v or ""))
+    return float(m.group(1)) if m else None
+
+
+def read_ocdc(source):
+    """Akasa's station charges from the tariff's OCDC sheet: the general-cargo ₹/kg charges (X-ray, screening,
+    certification, unitization, TSP, handling) per station, outbound and inbound. Special-cargo, DGR, AVI,
+    ICE, valuables and demurrage/storage rows are left out; minimum charges are ignored.
+    -> {station: {'out': [(charge, ₹/kg)], 'in': [(charge, ₹/kg)]}}"""
+    wb = openpyxl.load_workbook(source, read_only=True, data_only=True)
+    try:
+        ws = next((ws for ws in wb.worksheets if ws.title.strip().upper() == "OCDC"), None)
+        if ws is None:
+            return {}
+        out, stn = {}, None
+        for row in ws.iter_rows(values_only=True):
+            row = list(row) + [None] * 6
+            first = str(row[0] or "").strip().upper()
+            if len(first) == 3 and first.isalpha():
+                stn = station(first)
+            elif first:
+                stn = None  # a section title or header row
+            cat = re.sub(r"\s+", " ", str(row[1] or "")).strip()
+            low = cat.lower()
+            perishable_only = ("perishable" in low or "per cargo" in low) and "general" not in low
+            if (not stn or not cat or perishable_only or any(w in low for w in _NOT_GENERAL)
+                    or low.startswith(("general cargo", "category"))):
+                continue
+            charges = out.setdefault(stn, {"out": [], "in": []})
+            for side, col in (("out", 2), ("in", 4)):
+                rate = _rate(row[col])
+                if rate:
+                    charges[side].append((cat, rate))
+        return out
+    finally:
+        wb.close()
+
+
+def ocdc_addon(ocdc, flight):
+    """Akasa's terminal-charge add-on for a flight: the origin's outbound + the destination's inbound
+    general-cargo ₹/kg charges from the OCDC sheet. -> (₹/kg, description) or (None, None)"""
+    o, d = station(flight["Origin"]), station(flight["Destination"])
+    if not ocdc or (o not in ocdc and d not in ocdc):
+        return None, None
+    out = ocdc.get(o, {}).get("out", [])
+    inb = ocdc.get(d, {}).get("in", [])
+    total = round(sum(r for _, r in out) + sum(r for _, r in inb), 2)
+    return total, f"{o} outbound {sum(r for _, r in out):g} + {d} inbound {sum(r for _, r in inb):g}"
+
+
 def quote_row(quote, flight, product, with_number=False):
     """The Allcargo row for a schedule flight, matched by flight number: its own flight row, else its
     product's row (e.g. GCR), else the route's ALL row. With with_number, rows without a Terminal &
@@ -130,13 +189,11 @@ def quote_row(quote, flight, product, with_number=False):
     return None, None
 
 
-def special_rate(quote, special, flight, product):
-    """The special Direct AWB rate for a flight whose Allcargo row says 'SSP & Console Rate as per attached
-    special rates' (those rows have no Terminal & Surcharges): the special sheet's ALL row for the route,
-    else the row for the flight's product in the airline's tariff (Prime or GCR) - the tariff decides when
-    the files disagree. -> (special row, 'ALL'|'PRIME'|'GCR') or (None, None)"""
-    row, _ = quote_row(quote, flight, product)
-    if not special or not row or row["ts"] is not None or "special" not in row["note"].lower():
+def special_rate(special, flight, product):
+    """The special Direct AWB rate (+100) for a flight the special-rates file covers: the route's ALL row,
+    else the row for the flight's product in the airline's tariff (Prime or GCR).
+    -> (special row, 'ALL'|'PRIME'|'GCR') or (None, None)"""
+    if not special:
         return None, None
     o, d, a = station(flight["Origin"]), station(flight["Destination"]), flight["Airline"]
     for k in ("ALL", "PRIME" if (product or "").upper() == "PRIME" else "GCR"):

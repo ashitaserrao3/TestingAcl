@@ -47,33 +47,53 @@ def test_rows_are_matched_by_flight_number_first(tmp_path):
     assert row(None, flight("DEL", "CJB", "INDIGO", "6E1"), "GCR") == (None, None)
 
 
-def test_special_rate_for_flights_whose_row_points_to_the_special_rates(tmp_path):
-    path = tmp_path / "ALLCARGO.xlsx"
-    prime = "Prime Flights, SSP & Console Rate as per attached special rates"
-    make_quote(path, [
-        ("BOM", "DEL", "AKASA", "QP 1109", None, prime),
-        ("BOM", "DEL", "AKASA", "ALL", 19.71, None),
-        ("DEL", "BOM", "AKASA", "QP 1119", None, "SSP & Console Rate as per attached special rates"),
-        ("DEL", "BOM", "AKASA", "GCR", None, "SSP & Console Rate as per attached special rates"),
-        ("AMD", "PNQ", "AKASA", "GCR", None, prime),
-    ])
-    q = allcargo.read_quote(path)
+def test_special_rate_by_route_and_the_tariffs_product():
     special = {"rows": {("BOM", "DEL", "AKASA", "PRIME"): {"ssp": 26.0, "console": 46.0},
                         ("DEL", "BOM", "AKASA", "PRIME"): {"ssp": 17.0, "console": 47.0},
                         ("DEL", "BOM", "AKASA", "GCR"): {"ssp": 16.0, "console": 37.0},
                         ("AMD", "PNQ", "AKASA", "ALL"): {"ssp": 29.0, "console": 49.0}}}
     sr = allcargo.special_rate
-    assert sr(q, special, flight("BOM", "DEL", "AKASA", "QP1109"), "PRIME")[1] == "PRIME"
-    # the tariff says GCR and the special sheet has only a Prime rate: the tariff wins, no special rate,
-    # and the flight takes the Terminal & Surcharges of the route's ALL row
-    assert sr(q, special, flight("BOM", "DEL", "AKASA", "QP1109"), "GCR") == (None, None)
-    assert allcargo.quote_row(q, flight("BOM", "DEL", "AKASA", "QP1109"), "GCR", with_number=True)[0]["ts"] == 19.71
-    assert sr(q, special, flight("BOM", "DEL", "AKASA", "QP1127"), "GCR") == (None, None)   # ALL row has a T&S
-    assert sr(q, special, flight("DEL", "BOM", "AKASA", "QP1119"), "GCR")[1] == "GCR"
-    assert sr(q, special, flight("DEL", "BOM", "AKASA", "QP1119"), "PRIME")[1] == "PRIME"
-    assert sr(q, special, flight("DEL", "BOM", "AKASA", "QP1110"), "GCR")[0]["ssp"] == 16.0  # the GCR row
-    assert sr(q, special, flight("AMD", "PNQ", "AKASA", "QP1911"), "GCR")[1] == "ALL"
-    assert sr(q, None, flight("DEL", "BOM", "AKASA", "QP1119"), "GCR") == (None, None)
+    assert sr(special, flight("BOM", "DEL", "AKASA", "QP1109"), "PRIME")[1] == "PRIME"
+    assert sr(special, flight("BOM", "DEL", "AKASA", "QP1127"), "GCR") == (None, None)  # Prime-only route
+    assert sr(special, flight("DEL", "BOM", "AKASA", "QP1119"), "GCR")[0]["ssp"] == 16.0
+    assert sr(special, flight("DEL", "BOM", "AKASA", "QP1119"), "PRIME")[0]["ssp"] == 17.0
+    assert sr(special, flight("AMD", "PNQ", "AKASA", "QP1911"), "GCR")[1] == "ALL"
+    assert sr(special, flight("AMD", "CCU", "AKASA", "QP1925"), "PRIME") == (None, None)  # route not in the file
+    assert sr(None, flight("DEL", "BOM", "AKASA", "QP1119"), "GCR") == (None, None)
+
+
+def test_ocdc_addon_is_origin_outbound_plus_destination_inbound(tmp_path):
+    wb = openpyxl.Workbook()
+    wb.active.title = "Tariff Rate"
+    ws = wb.create_sheet("OCDC")
+    for row in (
+        [None, None, "Outbound", None, "Inbound", None],
+        ["Station", "Category", "Rate Kgs", "Minimum Charges", "Rate Kgs", "Minimum Chagres"],
+        ["DEL", "X-Ray Charges ( Screening )", "Rs.1.60/-kg", "Rs.155/-", None, None],
+        [None, "X-Ray Charges ( Certification )", "Rs.1.60/-kg", "Rs.155/-", None, None],
+        [None, "Unitization   De-Unitization Charges", "Rs.1.75/-kg", "Rs.50/-", "Rs.1.45/-kg", "Rs.50/-"],
+        [None, "Unitization  De-Unitization (Special Cargo i.e AVI,PEF)", "Rs.2.00/-kg", "Rs.50/-", "Rs.1.65/-kg", None],
+        [None, "TSP CHARGES (General Cargo)", "Rs.1.65/-kg", "Rs.50/-", "Rs.1.65/-kg", "Rs.50/-"],
+        [None, "DGR Shipments", None, "Rs.3000/-", None, None],
+        [None, "Demurrage Charges  Storage(Per Day)", None, None, None, None],
+        [None, "General Cargo & Courier", "Rs.1.45/-kg", "Rs.50/-", "Rs.1.45/-kg", "Rs.50/-"],
+        ["BOM", "X-Ray Charges", "Rs.2.25/-kg", "Rs.195/-", None, None],
+        [None, "Unitization/ De-Unitization (General Cargo)", "Rs.2.25/-kg", "Rs.315/-", "Rs.2.25/-kg", "Rs.315/-"],
+        ["IXB", "TSP Charges (General Cargo) ( Perishable Cargo )", "Rs.5.50/-kg", "Rs.100/-", "Rs.4.50/-kg", None],
+        [],
+        ["CHARGES  FOR NON- CARGO TERMINAL STATIONS ", None, None, None, None, None],
+        ["AYJ", "Handling charges", "Rs.2.00/-", "Rs.100/- ", "Rs.1.00/-", "Rs.100/- "],
+    ):
+        ws.append(row)
+    path = tmp_path / "Akasa Tariff.xlsx"
+    wb.save(path)
+    ocdc = allcargo.read_ocdc(path)
+    assert round(sum(r for _, r in ocdc["DEL"]["out"]), 2) == 6.6
+    assert round(sum(r for _, r in ocdc["DEL"]["in"]), 2) == 3.1
+    assert allcargo.ocdc_addon(ocdc, flight("DEL", "BOM", "AKASA", "QP1119"))[0] == 8.85  # 6.60 + 2.25
+    assert allcargo.ocdc_addon(ocdc, flight("BOM", "IXB", "AKASA", "QP1"))[0] == 9.0      # 4.50 + 4.50
+    assert allcargo.ocdc_addon(ocdc, flight("AYJ", "DEL", "AKASA", "QP2"))[0] == 5.1      # 2.00 + 3.10
+    assert allcargo.ocdc_addon(ocdc, flight("GOI", "PNY", "AKASA", "QP3")) == (None, None)
 
 
 def test_airline_tariffs_are_not_taken_for_the_quote(tmp_path):
