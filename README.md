@@ -24,6 +24,17 @@ The app reads these files from the `data/` folder:
 | `data/allcargo/` | The Allcargo rate quotation (.xlsx) – Terminal & Surcharges. |
 | `data/special/` | The Akasa special rates (.pdf). |
 
+**New airline tariff (every ~15 days):** sign in as `ashita`, and in the sidebar under
+*Update tariff* upload the new file. The app shows what changes, line by line, against the
+tariff in use (changed rates, new lines, lines not in the new file). Then choose:
+
+* *Update only the lines in this file* – for a file with just the revised routes; every other
+  line stays as it is (the newest file wins for each line it has).
+* *Replace the whole tariff* – for a complete new tariff; the old file is removed.
+
+*Publish* saves it to this repo (needs the `[github]` section in Secrets, see
+`secrets.toml.example`); everyone sees the new rates at once, and after restarts.
+
 **To change the data:** on GitHub open the folder, click *Add file → Upload files*,
 drop in the new file, delete the old one, and *Commit changes*. Streamlit Cloud
 redeploys the app in about a minute with the new data.

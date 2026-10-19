@@ -4,11 +4,14 @@ import hashlib
 import html
 import os
 import re
+import tempfile
 
 import streamlit as st
 import streamlit_authenticator as stauth
 
 import allcargo
+import publish
+import tariff_changes
 from tariffapp import database_path, db, queries, sync
 from tariffapp.linker import STATUS_CHECK, STATUS_NO_RATE, STATUS_NO_TARIFF, TariffEngine
 
@@ -231,6 +234,138 @@ with top[2]:
     authenticator.logout("Sign out", use_container_width=True)
 if not ss.get("authentication_status"):
     st.rerun()  # just signed out -> back to the login screen
+
+# =====================================================
+# UPDATE TARIFF (only ADMIN_USER): upload a new airline tariff, review what changed, publish it to GitHub
+# =====================================================
+
+ADMIN_USER = "ashita"
+
+
+def github():
+    """Where published tariffs are saved, or None when [github] isn't in Streamlit Secrets."""
+    cfg = st.secrets.get("github", {})
+    if not cfg.get("token"):
+        return None
+    return publish.GitHub(cfg["token"], cfg.get("repo", "ashitaserrao3/TestingAcl"), cfg.get("branch", "main"))
+
+
+@st.cache_resource(show_spinner="Reading the tariffs in use…", max_entries=1)
+def tariffs_in_use(signature):
+    """{carrier: [(file name, effective date, {line: row})]} for the airline tariffs in data/rates."""
+    folder = os.path.join(sync.data_dir(), "rates")
+    out = {}
+    for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        if name.lower().endswith(sync.XLSX):
+            try:
+                carrier, eff, lines = tariff_changes.read_tariff(os.path.join(folder, name))
+            except Exception:  # noqa: BLE001 - not an airline tariff, or unreadable
+                continue
+            out.setdefault(carrier, []).append((name, eff, lines))
+    return out
+
+
+def read_upload(up):
+    """Parse an uploaded tariff (once per file) and compare it with the tariff in use."""
+    if ss.get("_review", {}).get("id") != up.file_id:
+        name = re.sub(r'[\\/:*?"<>|]+', "_", os.path.basename(up.name)).strip()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, name)
+            with open(path, "wb") as f:
+                f.write(up.getvalue())
+            try:
+                carrier, eff, lines = tariff_changes.read_tariff(path)
+            except Exception as e:  # noqa: BLE001 - shown to Ashita
+                ss["_review"] = {"id": up.file_id, "name": name, "error": str(e)}
+                return ss["_review"]
+        current = tariffs_in_use(signature).get(carrier, [])
+        old = tariff_changes.current_lines([(e, ls) for _, e, ls in current])
+        ss["_review"] = {"id": up.file_id, "name": name, "data": up.getvalue(), "carrier": carrier, "eff": eff,
+                         "current": [n for n, _, _ in current], "report": tariff_changes.compare(old, lines)}
+    return ss["_review"]
+
+
+def publish_tariff(review, replace):
+    """Save the new tariff to GitHub (and here), replacing the airline's old files or adding to them."""
+    files = {f"data/rates/{review['name']}": review["data"]}
+    if replace:
+        files.update({f"data/rates/{n}": None for n in review["current"] if n != review["name"]})
+    how = "replaces" if replace else "updates the lines in"
+    gh = github()
+    with st.spinner("Saving to GitHub…"):
+        gh.commit(files, f"{review['carrier']} tariff {review['name']} {how} the tariff in use\n\n"
+                         f"Published from the app by {ss.get('username')}.")
+    for path, data in files.items():  # show it here at once; the redeploy from GitHub follows
+        local = os.path.join(sync.data_dir(), path.split("/", 1)[1])
+        if data is None:
+            if os.path.exists(local):
+                os.remove(local)
+        else:
+            with open(local, "wb") as f:
+                f.write(data)
+    ss["_published"] = f"{review['carrier']} tariff published: {review['name']}. Everyone sees it now."
+    ss.pop("_review", None)
+    ss["_upload_n"] = ss.get("_upload_n", 0) + 1  # clears the uploader
+    st.rerun()
+
+
+if ss.get("username") == ADMIN_USER:
+    with st.sidebar:
+        st.header("Update tariff")
+        up = st.file_uploader("New airline tariff (.xlsx)", type=["xlsx"], key=f"tariff_{ss.get('_upload_n', 0)}",
+                              help="IndiGo, Air India, Akasa, SpiceJet or Star Air. Keep the airline's file name; "
+                                   "the effective date is read from it. You'll see what changes before publishing.")
+        if ss.get("_published"):
+            st.success(ss.pop("_published"))
+        if github() is None:
+            st.warning("Publishing is off: add the [github] section to Streamlit Secrets (see secrets.toml.example).")
+    if up:
+        review = read_upload(up)
+        with st.container(border=True):
+            if review.get("error"):
+                st.error(f"Couldn't read {review['name']} as an airline tariff: {review['error']}")
+            else:
+                rep, carrier = review["report"], review["carrier"]
+                st.subheader(f"Review: {carrier} tariff" + (f" · eff. {dmy(review['eff'])}" if review["eff"] else ""))
+                st.caption(f"{review['name']} compared with the {carrier} tariff in use: "
+                           + (", ".join(review["current"]) or "none"))
+                m = st.columns(4)
+                m[0].metric("Lines changed", len(rep["changed"]))
+                m[1].metric("New lines", len(rep["added"]))
+                m[2].metric("Unchanged", rep["same"])
+                m[3].metric("Not in the new file", len(rep["missing"]))
+                if rep["changed"]:
+                    st.dataframe([{"Line": tariff_changes.describe(k), "Change": " · ".join(
+                        f"{label}: {'–' if a is None else a} → {'–' if b is None else b}" for label, a, b in diffs)}
+                        for k, _, diffs in rep["changed"]], hide_index=True, width="stretch")
+                for title, items in (("New lines", rep["added"]), ("Lines in use that aren't in the new file",
+                                                                   rep["missing"])):
+                    if items:
+                        with st.expander(f"{title} ({len(items)})"):
+                            st.dataframe([{"Line": tariff_changes.describe(k), "45+": r.get("RateQ45"),
+                                           "100+": r.get("RateQ100")} for k, r in items], hide_index=True,
+                                         width="stretch")
+                partial = len(rep["missing"]) > (len(rep["changed"]) + rep["same"])
+                mode = st.radio("How should it be used?", [
+                    f"Update only the lines in this file — every other {carrier} line stays as it is",
+                    f"Replace the whole {carrier} tariff — lines not in this file are removed"],
+                    index=0 if partial else 1, key=f"mode_{review['id']}")
+                problems = []
+                if review["eff"] is None:
+                    problems.append("No effective date found in the file name or the file. Rename it to include "
+                                    "the date (e.g. 'Eff. 16th Oct 2026') and upload it again.")
+                if github() is None:
+                    problems.append("Publishing is off until the [github] section is in Streamlit Secrets.")
+                if review["eff"] and review["eff"] > today:
+                    st.info(f"It takes effect on {dmy(review['eff'])}; until then the current rates stay in use.")
+                for p in problems:
+                    st.error(p)
+                if st.button("Publish", type="primary", disabled=bool(problems)):
+                    try:
+                        publish_tariff(review, replace=mode.startswith("Replace"))
+                    except RuntimeError as e:
+                        st.error(f"Couldn't save to GitHub, nothing was changed: {e}")
+
 
 hubs, stations = queries.stations(conn)
 if not stations:
